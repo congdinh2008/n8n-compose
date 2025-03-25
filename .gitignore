@@ -1,3 +1,28 @@
+# IDE
 .vscode/
+.idea/
+
+# Environment variables and sensitive data
 .env
+*.env
+!example.env
+*_credentials.csv
+*_accessKeys.csv
+
+# Node.js
 node_modules/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+!terraform.example.tfvars
+*.tfplan
+.terraformrc
+terraform.rc
+.terraform.lock.hcl
+
+# OS
+.DS_Store
+Thumbs.db
