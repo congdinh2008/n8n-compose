@@ -5,7 +5,12 @@ output "instance_id" {
 
 output "public_ip" {
   description = "Public IP of the n8n instance"
-  value       = aws_instance.n8n.public_ip
+  value       = var.enable_elastic_ip ? aws_eip.n8n[0].public_ip : aws_instance.n8n.public_ip
+}
+
+output "elastic_ip" {
+  description = "Elastic IP address (if enabled)"
+  value       = var.enable_elastic_ip ? aws_eip.n8n[0].public_ip : null
 }
 
 output "public_dns" {
