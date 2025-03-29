@@ -15,7 +15,7 @@ log "Starting n8n setup script"
 log "Installing required packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y apt-transport-https ca-certificates curl software-properties-common nginx certbot python3-certbot-nginx git fail2ban ufw jq unzip
+apt-get install -y apt-transport-https ca-certificates curl software-properties-common nginx certbot python3-certbot-nginx fail2ban ufw jq unzip
 
 # Configure fail2ban for SSH protection
 log "Configuring fail2ban for SSH protection"
@@ -64,6 +64,7 @@ chmod +x /usr/local/bin/docker-compose
 log "Creating n8n directory structure"
 mkdir -p /opt/n8n/nginx
 mkdir -p /opt/n8n/logs
+mkdir -p /opt/n8n/src
 cd /opt/n8n
 
 # Setup backup functionality if enabled
@@ -81,7 +82,7 @@ BACKUP_FILE="n8n-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
 mkdir -p $BACKUP_DIR
 
 # Stop n8n service
-cd /opt/n8n
+cd /opt/n8n/src
 docker-compose stop n8n
 
 # Create backup
@@ -122,61 +123,84 @@ WantedBy=timers.target
 EOT
 fi
 
-# Clone the GitHub repository
-log "Cloning n8n repository"
-git clone https://github.com/congdinh2008/n8n-compose.git .
+# Create docker-compose.yml file directly instead of cloning from GitHub
+log "Creating docker-compose.yml file"
+cat > /opt/n8n/src/docker-compose.yml << EOT
+services:
+  postgres:
+    image: postgres:latest
+    restart: always
+    environment:
+      - POSTGRES_USER=${db_user}
+      - POSTGRES_PASSWORD=${db_password}
+      - POSTGRES_DB=${db_name}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${db_user}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - n8n-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
 
-# Create .env file with proper configuration
-log "Creating environment configuration"
-cat > /opt/n8n/.env << EOT
-# =======================
-# DOMAIN CONFIGURATION
-# =======================
-DOMAIN_NAME=${domain_name}
-SUBDOMAIN=${subdomain}
-N8N_PROTOCOL=${n8n_protocol}
-N8N_PORT_MAPPING=127.0.0.1:5678:5678
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    restart: always
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${db_name}
+      - DB_POSTGRESDB_USER=${db_user}
+      - DB_POSTGRESDB_PASSWORD=${db_password}
+      - N8N_HOST=${subdomain}.${domain_name}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${n8n_protocol}
+      - NODE_ENV=production
+      - WEBHOOK_URL=${n8n_protocol}://${subdomain}.${domain_name}/
+      - GENERIC_TIMEZONE=${timezone}
+      - N8N_ENCRYPTION_KEY=$(openssl rand -hex 24)
+      - N8N_BASIC_AUTH_ACTIVE=${enable_basic_auth}
+      - N8N_BASIC_AUTH_USER=${basic_auth_user}
+      - N8N_BASIC_AUTH_PASSWORD=${basic_auth_password}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - n8n-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
 
-# =======================
-# DATABASE CONFIGURATION
-# =======================
-POSTGRES_USER=${db_user}
-POSTGRES_PASSWORD=${db_password}
-POSTGRES_DB=${db_name}
+networks:
+  n8n-network:
+    driver: bridge
 
-# =======================
-# N8N CONFIGURATION
-# =======================
-GENERIC_TIMEZONE=${timezone}
-
-# Security settings
-N8N_ENCRYPTION_KEY=$(openssl rand -hex 24)
-N8N_BASIC_AUTH_ACTIVE=${enable_basic_auth}
-N8N_BASIC_AUTH_USER=${basic_auth_user}
-N8N_BASIC_AUTH_PASSWORD=${basic_auth_password}
-
-# =======================
-# SSL CONFIGURATION
-# =======================
-SSL_EMAIL=${ssl_email}
-
-# =======================
-# COMPOSE PROJECT SETTINGS
-# =======================
-COMPOSE_PROJECT_NAME=n8n
+volumes:
+  postgres_data:
+    name: n8n_postgres_data
+  n8n_data:
+    name: n8n_n8n_data
 EOT
-
-# Source environment variables
-set -a
-source /opt/n8n/.env
-set +a
 
 # Process nginx configuration file
 log "Configuring Nginx"
 cat > /etc/nginx/sites-available/n8n << EOT
 # Optimized n8n nginx configuration
 server {
-    server_name $SUBDOMAIN.$DOMAIN_NAME;
+    server_name ${subdomain}.${domain_name};
     
     access_log /var/log/nginx/n8n-access.log;
     error_log /var/log/nginx/n8n-error.log;
@@ -234,7 +258,30 @@ nginx -t && systemctl restart nginx
 
 # Set up Let's Encrypt SSL certificate
 log "Setting up SSL certificate"
-certbot --nginx -d "$SUBDOMAIN.$DOMAIN_NAME" --non-interactive --agree-tos --email "$SSL_EMAIL" --redirect
+log "Checking SSL certificate for ${subdomain}.${domain_name}"
+
+# Check existing SSL certificate
+DOMAIN="${subdomain}.${domain_name}"
+CERT_PATH="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+KEY_PATH="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
+
+if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
+    # Check certificate expiration (30 days threshold)
+    EXPIRY=$(openssl x509 -enddate -noout -in "$CERT_PATH" | cut -d= -f2)
+    EXPIRY_EPOCH=$(date -d "$EXPIRY" +%s)
+    NOW_EPOCH=$(date +%s)
+    DAYS_REMAINING=$(( ($EXPIRY_EPOCH - $NOW_EPOCH) / 86400 ))
+    
+    if [ $DAYS_REMAINING -gt 30 ]; then
+        log "Certificate for $DOMAIN is still valid for $DAYS_REMAINING days. Skipping renewal."
+    else
+        log "Certificate for $DOMAIN will expire in $DAYS_REMAINING days. Proceeding with renewal."
+        certbot renew --quiet
+    fi
+else
+    log "No existing certificate found for $DOMAIN. Obtaining new certificate."
+    certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "${ssl_email}" --redirect
+fi
 
 # Make sure docker socket is accessible
 log "Setting Docker permissions"
@@ -242,161 +289,9 @@ sudo chmod 666 /var/run/docker.sock
 
 # Start n8n with proper error handling
 log "Starting n8n"
-cd /opt/n8n
+cd /opt/n8n/src
 docker-compose pull
 docker-compose down --volumes --remove-orphans 2>/dev/null || true
 sleep 5
 docker-compose up -d
-
-# Wait for services to be healthy
-log "Waiting for services to become healthy"
-attempt=1
-max_attempts=30
-until docker-compose ps | grep "n8n" | grep "Up" || [ $attempt -eq $max_attempts ]; do
-    log "Waiting for n8n to start (attempt $attempt/$max_attempts)..."
-    sleep 10
-    attempt=$(( attempt + 1 ))
-done
-
-if [ $attempt -eq $max_attempts ]; then
-    log "Failed to start n8n after $max_attempts attempts"
-    docker-compose logs > /opt/n8n/logs/startup_failure.log
-    exit 1
-else
-    log "n8n has started successfully"
-    log "You can access n8n at: https://$SUBDOMAIN.$DOMAIN_NAME"
-fi
-
-# Create a service to check and renew SSL certificates
-log "Setting up SSL certificate auto-renewal"
-cat > /etc/systemd/system/certbot-renew.service << EOT
-[Unit]
-Description=Certbot Renewal Service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/certbot renew --quiet --nginx --post-hook "systemctl reload nginx"
-EOT
-
-cat > /etc/systemd/system/certbot-renew.timer << EOT
-[Unit]
-Description=Timer for Certbot Renewal
-
-[Timer]
-OnCalendar=*-*-* 00:00:00
-RandomizedDelaySec=43200
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOT
-
-# Create a system health check script
-log "Creating system health monitoring"
-cat > /opt/n8n/healthcheck.sh << 'EOF'
-#!/bin/bash
-LOGFILE="/opt/n8n/logs/healthcheck.log"
-
-echo "$(date): Running health check" >> $LOGFILE
-
-# Check if Docker is running
-if ! systemctl is-active --quiet docker; then
-    echo "$(date): Docker is not running, attempting to restart" >> $LOGFILE
-    systemctl restart docker
-    sleep 10
-fi
-
-# Check if n8n containers are running
-if ! docker ps | grep -q "n8n"; then
-    echo "$(date): n8n container not running, attempting to restart" >> $LOGFILE
-    cd /opt/n8n
-    docker-compose up -d
-fi
-
-# Check disk space
-DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}' | cut -d'%' -f1)
-if [ "$DISK_USAGE" -ge 90 ]; then
-    echo "$(date): Disk usage is high: $DISK_USAGE%" >> $LOGFILE
-fi
-EOF
-chmod +x /opt/n8n/healthcheck.sh
-
-# Create a service for the healthcheck
-cat > /etc/systemd/system/n8n-healthcheck.service << EOT
-[Unit]
-Description=n8n Health Check Service
-
-[Service]
-Type=oneshot
-ExecStart=/opt/n8n/healthcheck.sh
-EOT
-
-cat > /etc/systemd/system/n8n-healthcheck.timer << EOT
-[Unit]
-Description=Regular n8n health check
-
-[Timer]
-OnCalendar=*-*-* *:15:00
-RandomizedDelaySec=60
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOT
-
-# Enable all systemd services and timers
-log "Enabling system services"
-systemctl enable certbot-renew.timer
-systemctl start certbot-renew.timer
-
-if [ "${enable_auto_backup}" = "true" ]; then
-  systemctl enable n8n-backup.timer
-  systemctl start n8n-backup.timer
-fi
-
-systemctl enable n8n-healthcheck.timer
-systemctl start n8n-healthcheck.timer
-
-# Setup log rotation
-log "Setting up log rotation"
-cat > /etc/logrotate.d/n8n << EOF
-/opt/n8n/logs/*.log {
-    weekly
-    missingok
-    rotate 7
-    compress
-    delaycompress
-    notifempty
-    create 0640 root root
-}
-EOF
-
-# Final security settings
-log "Applying final security settings"
-
-# Disable root login via ssh
-sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config
-sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
-
-# Setup unattended security upgrades
-apt-get install -y unattended-upgrades apt-listchanges
-cat > /etc/apt/apt.conf.d/50unattended-upgrades << EOF
-Unattended-Upgrade::Allowed-Origins {
-    "\${distro_id}:\${distro_codename}";
-    "\${distro_id}:\${distro_codename}-security";
-    "\${distro_id}ESMApps:\${distro_codename}-apps-security";
-    "\${distro_id}ESM:\${distro_codename}-infra-security";
-};
-Unattended-Upgrade::Package-Blacklist {
-};
-Unattended-Upgrade::Automatic-Reboot "true";
-Unattended-Upgrade::Automatic-Reboot-Time "02:00";
-EOF
-
-cat > /etc/apt/apt.conf.d/20auto-upgrades << EOF
-APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Unattended-Upgrade "1";
-EOF
-
-log "Setup completed successfully"
 

@@ -56,8 +56,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          cpus: '1'
+          memory: 1G
 
 networks:
   n8n-network:

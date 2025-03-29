@@ -17,7 +17,7 @@ resource "aws_security_group" "n8n_sg" {
         port        = 80
         protocol    = "tcp"
         cidr_blocks = ["0.0.0.0/0"]
-        description = "HTTP access for Let's Encrypt validation and redirects"
+        description = "HTTP access for validation and redirects"
       }
       https = {
         port        = 443
