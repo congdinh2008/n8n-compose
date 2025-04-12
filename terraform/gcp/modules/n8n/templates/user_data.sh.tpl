@@ -9,13 +9,17 @@ log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a /var/log/n8n-setup.log
 }
 
-log "Starting n8n setup script on Azure VM"
+log "Starting n8n setup script on GCP VM"
 
 # Install required packages
 log "Installing required packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y apt-transport-https ca-certificates curl software-properties-common nginx certbot python3-certbot-nginx fail2ban ufw jq unzip
+apt-get install -y apt-transport-https ca-certificates curl software-properties-common nginx certbot python3-certbot-nginx fail2ban ufw jq unzip git
+
+# Set timezone
+log "Setting timezone to ${timezone}"
+timedatectl set-timezone ${timezone}
 
 # Configure fail2ban for SSH protection
 log "Configuring fail2ban for SSH protection"
@@ -57,8 +61,8 @@ sudo systemctl start docker
 # Install Docker Compose v2
 log "Installing Docker Compose"
 DOCKER_COMPOSE_VERSION="2.23.0"
-sudo curl -L "https://github.com/docker/compose/releases/download/v$${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
+curl -L "https://github.com/docker/compose/releases/download/v$${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
 
 # Create n8n directory structure
 log "Creating n8n directory structure"
@@ -66,66 +70,6 @@ sudo mkdir -p /opt/n8n/nginx
 sudo mkdir -p /opt/n8n/logs
 sudo mkdir -p /opt/n8n/src
 cd /opt/n8n
-
-# Setup backup functionality if enabled
-if [ "${enable_auto_backup}" = "true" ]; then
-  log "Setting up automated backup functionality"
-  sudo mkdir -p /opt/n8n/backups
-  
-  # Create backup script
-  cat > /opt/n8n/backup.sh << 'EOF'
-#!/bin/bash
-BACKUP_DIR="/opt/n8n/backups"
-BACKUP_FILE="n8n-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
-
-# Create backup directory if it doesn't exist
-sudo mkdir -p $BACKUP_DIR
-
-# Stop n8n service
-cd /opt/n8n/src
-docker-compose stop n8n
-
-# Create backup
-sudo tar -czf $BACKUP_DIR/$BACKUP_FILE -C /opt/n8n .
-
-# Start n8n service
-docker-compose start n8n
-
-# Remove backups older than 7 days
-find $BACKUP_DIR -type f -name "n8n-backup-*.tar.gz" -mtime +7 -delete
-
-# Log backup
-echo "Backup completed: $BACKUP_FILE" >> /var/log/n8n-backup.log
-EOF
-  sudo chmod +x /opt/n8n/backup.sh
-  
-  # Create backup service and timer
-  cat > /etc/systemd/system/n8n-backup.service << EOT
-[Unit]
-Description=n8n Backup Service
-
-[Service]
-Type=oneshot
-ExecStart=/opt/n8n/backup.sh
-EOT
-
-  cat > /etc/systemd/system/n8n-backup.timer << EOT
-[Unit]
-Description=Weekly n8n backup
-
-[Timer]
-OnCalendar=Sun 01:00:00
-RandomizedDelaySec=3600
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOT
-
-  # Enable and start the timer
-  sudo systemctl enable n8n-backup.timer
-  sudo systemctl start n8n-backup.timer
-fi
 
 # Create docker-compose.yml file
 log "Creating docker-compose.yml file"
@@ -199,7 +143,7 @@ volumes:
     name: n8n_n8n_data
 EOT
 
-# Process nginx configuration file
+# Configure Nginx
 log "Configuring Nginx"
 cat > /etc/nginx/sites-available/n8n << EOT
 # Optimized n8n nginx configuration
@@ -281,25 +225,88 @@ if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
         log "Certificate for $DOMAIN is still valid for $DAYS_REMAINING days. Skipping renewal."
     else
         log "Certificate for $DOMAIN will expire in $DAYS_REMAINING days. Proceeding with renewal."
-        certbot renew --quiet
+        sudo certbot renew --quiet
     fi
 else
     log "No existing certificate found for $DOMAIN. Obtaining new certificate."
-    certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "${ssl_email}" --redirect
+    sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "${ssl_email}" --redirect
 fi
 
-# Make sure docker socket is accessible
-log "Setting Docker permissions"
-sudo chmod 666 /var/run/docker.sock
+# Start the containers
+cd /opt/n8n/src && docker-compose up -d
+
+# Setup backup functionality if enabled
+if [ "${enable_auto_backup}" = "true" ]; then
+  log "Setting up automated backup functionality"
+  sudo mkdir -p /opt/n8n/backups
+  
+  # Create backup script
+  cat > /opt/n8n/backup.sh << 'EOF'
+#!/bin/bash
+BACKUP_DIR="/opt/n8n/backups"
+BACKUP_FILE="n8n-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+
+# Create backup directory if it doesn't exist
+sudo mkdir -p $BACKUP_DIR
+
+# Stop n8n service
+cd /opt/n8n/src
+docker-compose stop n8n
+
+# Create backup
+sudo tar -czf $BACKUP_DIR/$BACKUP_FILE -C /opt/n8n .
 
 # Start n8n service
-log "Starting n8n"
-cd /opt/n8n/src
-docker-compose pull
-docker-compose down --volumes --remove-orphans 2>/dev/null || true
-sleep 5
-docker-compose up -d
+docker-compose start n8n
 
-# Final log message
-log "n8n setup completed successfully"
-echo "n8n is now available at: ${n8n_protocol}://${subdomain}.${domain_name}"
+# Remove backups older than 7 days
+find $BACKUP_DIR -type f -name "n8n-backup-*.tar.gz" -mtime +7 -delete
+
+# Log backup
+echo "Backup completed: $BACKUP_FILE" >> /var/log/n8n-backup.log
+EOF
+  sudo chmod +x /opt/n8n/backup.sh
+  
+  # Create backup service and timer
+  cat > /etc/systemd/system/n8n-backup.service << EOT
+[Unit]
+Description=n8n Backup Service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/n8n/backup.sh
+EOT
+
+  cat > /etc/systemd/system/n8n-backup.timer << EOT
+[Unit]
+Description=Weekly n8n backup
+
+[Timer]
+OnCalendar=Sun 01:00:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOT
+
+  # Enable and start the timer
+  sudo systemctl enable n8n-backup.timer
+  sudo systemctl start n8n-backup.timer
+fi
+
+# Add GCP-specific monitoring and utilities
+sudo curl -sSO https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
+bash add-google-cloud-ops-agent-repo.sh --also-install
+
+# Set up automatic updates
+sudo apt-get install -y unattended-upgrades
+cat > /etc/apt/apt.conf.d/20auto-upgrades << 'EOL'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+APT::Periodic::Unattended-Upgrade "1";
+EOL
+
+# Configure email for system alerts
+sudo apt-get install -y postfix
