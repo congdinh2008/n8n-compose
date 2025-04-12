@@ -256,12 +256,10 @@ server {
 EOT
 
 # Setup nginx
+log "Setting up Nginx"
 sudo ln -sf /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && systemctl restart nginx
-
-# Restart Nginx to apply changes
-sudo systemctl restart nginx
 
 # Set up Let's Encrypt SSL certificate
 log "Setting up SSL certificate"
