@@ -157,7 +157,7 @@ services:
     environment:
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
-      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_PORT=2070
       - DB_POSTGRESDB_DATABASE=${db_name}
       - DB_POSTGRESDB_USER=${db_user}
       - DB_POSTGRESDB_PASSWORD=${db_password}
