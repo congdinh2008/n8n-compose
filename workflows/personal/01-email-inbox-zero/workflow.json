@@ -1,0 +1,321 @@
+{
+  "name": "Personal: Email Inbox Zero",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "messageReceived",
+        "simple": false,
+        "filters": {
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger (New Email)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [250, 300],
+      "notes": "⚠️ Trigger khi có email unread mới. Cần Gmail OAuth2 credential. Cấu hình polling interval trong Settings."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Email Classification for Vietnamese users\nconst email = $input.first().json;\nconst subject = (email.subject || '').toLowerCase();\nconst from = (email.from || '').toLowerCase();\nconst body = (email.textPlain || email.body || '').toLowerCase();\nconst fullText = `${subject} ${from} ${body}`;\n\n// VIP senders list - customize this list\nconst vipSenders = [\n  'boss@company.com',\n  'manager@company.com',\n  'important-client@corp.com',\n  'family@email.com',\n  'spouse@email.com'\n];\n\nlet category = 'normal';\nlet action = 'keep_inbox';\nlet label = '';\nlet priority = 'medium';\nlet notifyUser = false;\n\n// Newsletter detection\nconst newsletterKeywords = [\n  'unsubscribe', 'newsletter', 'digest', 'bản tin', 'hủy đăng ký',\n  'no-reply', 'noreply', 'do-not-reply', 'mailing list'\n];\n\n// Promotion detection\nconst promoKeywords = [\n  'sale', 'discount', '% off', 'giảm giá', 'khuyến mãi', 'flash sale',\n  'ưu đãi', 'giảm sốc', 'deal hot', 'hot deal', 'miễn phí', 'free',\n  'gift voucher', 'coupon', 'promo', 'offer', 'special offer',\n  'black friday', 'cyber monday', 'tet sale', 'sale tet'\n];\n\n// Important/Urgent detection\nconst urgentKeywords = [\n  'urgent', 'khẩn', 'important', 'gấp', 'emergency', 'ngay lập tức',\n  'asap', 'immediately', 'deadline', 'hạn chót', 'cảnh báo', 'warning',\n  'payment due', 'thanh toán', 'overdue', 'quá hạn'\n];\n\n// Classification logic\nconst hasNewsletterKeyword = newsletterKeywords.some(kw => fullText.includes(kw));\nconst hasPromoKeyword = promoKeywords.some(kw => fullText.includes(kw));\nconst hasUrgentKeyword = urgentKeywords.some(kw => fullText.includes(kw));\nconst isVipSender = vipSenders.some(sender => from.includes(sender));\n\nif (isVipSender || hasUrgentKeyword) {\n  category = 'important';\n  action = 'star_and_notify';\n  label = '⭐ Important';\n  priority = 'high';\n  notifyUser = true;\n} else if (hasNewsletterKeyword) {\n  category = 'newsletter';\n  action = 'label_and_archive';\n  label = '📬 Newsletter';\n  priority = 'low';\n} else if (hasPromoKeyword) {\n  category = 'promotion';\n  action = 'label_and_archive';\n  label = '🏷️ Promotion';\n  priority = 'low';\n} else {\n  category = 'normal';\n  action = 'label_and_keep';\n  label = '📥 Inbox';\n  priority = 'medium';\n}\n\n// Confidence score based on keyword matches\nconst keywordCount = [\n  ...newsletterKeywords,\n  ...promoKeywords,\n  ...urgentKeywords\n].filter(kw => fullText.includes(kw)).length;\n\nconst confidence = Math.min(100, (keywordCount / 3) * 100);\n\nreturn [{\n  json: {\n    ...email,\n    category,\n    action,\n    label,\n    priority,\n    notify_user: notifyUser,\n    confidence,\n    keyword_count: keywordCount,\n    classified_at: new Date().toISOString(),\n    timezone: 'Asia/Ho_Chi_Minh'\n  }\n}];"
+      },
+      "id": "classify-email",
+      "name": "Classify Email Type",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Phân loại email thành: Important, Newsletter, Promotion, Normal. Dựa trên keywords tiếng Việt và VIP senders list. Customize danh sách VIP senders theo nhu cầu."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "category-check",
+              "leftValue": "={{ $json.category }}",
+              "rightValue": "important",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-important",
+      "name": "IF: Important Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Nếu là email quan trọng → Star + Notify. Nếu không → Label + Archive/Keep."
+    },
+    {
+      "parameters": {
+        "resource": "label",
+        "operation": "add",
+        "messageId": "={{ $json.id }}",
+        "labelIds": ["STARRED", "INBOX"],
+        "options": {}
+      },
+      "id": "star-important",
+      "name": "Star Important Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 150],
+      "notes": "⭐ Gắn sao cho email quan trọng để dễ tìm. Cần Gmail OAuth credential."
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "⭐ *Email quan trọng!*\n\n*Từ:* {{ $json.from }}\n*Chủ đề:* {{ $json.subject }}\n*Độ ưu tiên:* {{ $json.priority }}\n*Confidence:* {{ $json.confidence }}%\n\n📧 Mở email để xem chi tiết và trả lời!",
+        "additionalFields": {}
+      },
+      "id": "notify-telegram",
+      "name": "Notify via Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1250, 150],
+      "notes": "⚠️ Gửi notification qua Telegram cho email quan trọng. Cần bot token và chat_id. Có thể bỏ node này nếu không cần."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "newsletter-check",
+              "leftValue": "={{ $('Classify Email Type').first().json.category }}",
+              "rightValue": "newsletter",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-newsletter",
+      "name": "IF: Newsletter?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 450],
+      "notes": "Nếu là newsletter → Label + Archive. Nếu không → check promotion."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "promo-check",
+              "leftValue": "={{ $('Classify Email Type').first().json.category }}",
+              "rightValue": "promotion",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-promotion",
+      "name": "IF: Promotion?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 650],
+      "notes": "Nếu là promotion → Label + Archive. Nếu không → Normal (keep in inbox)."
+    },
+    {
+      "parameters": {
+        "resource": "label",
+        "operation": "add",
+        "messageId": "={{ $('Classify Email Type').first().json.id }}",
+        "labelIds": [],
+        "options": {}
+      },
+      "id": "apply-label",
+      "name": "Apply Label",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 450],
+      "notes": "⚠️ Gán label cho email. Cần tạo labels trong Gmail trước: 'Newsletter', 'Promotion'. Dùng Gmail node với operation = add label."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "archive",
+        "messageId": "={{ $('Classify Email Type').first().json.id }}",
+        "options": {}
+      },
+      "id": "archive-email",
+      "name": "Archive Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1500, 450],
+      "notes": "⚠️ Archive email (xóa khỏi Inbox nhưng không xóa hẳn). Vẫn tìm được trong All Mail. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log email classification result\nconst email = $input.first().json;\n\nconsole.log(`Email classified: ${email.category} | ${email.action}`);\nconsole.log(`From: ${email.from}`);\nconsole.log(`Subject: ${email.subject}`);\nconsole.log(`Confidence: ${email.confidence}%`);\n\nreturn [{\n  json: {\n    category: email.category,\n    action: email.action,\n    from: email.from,\n    subject: email.subject,\n    processed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "log-result",
+      "name": "Log Processing Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1750, 450],
+      "notes": "Log kết quả phân loại vào execution log để debug và theo dõi."
+    }
+  ],
+  "connections": {
+    "Gmail Trigger (New Email)": {
+      "main": [
+        [
+          {
+            "node": "Classify Email Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Email Type": {
+      "main": [
+        [
+          {
+            "node": "IF: Important Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Important Email?": {
+      "main": [
+        [
+          {
+            "node": "Star Important Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF: Newsletter?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Star Important Email": {
+      "main": [
+        [
+          {
+            "node": "Notify via Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify via Telegram": {
+      "main": [
+        [
+          {
+            "node": "Log Processing Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Newsletter?": {
+      "main": [
+        [
+          {
+            "node": "Apply Label",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF: Promotion?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Promotion?": {
+      "main": [
+        [
+          {
+            "node": "Apply Label",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Apply Label": {
+      "main": [
+        [
+          {
+            "node": "Archive Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive Email": {
+      "main": [
+        [
+          {
+            "node": "Log Processing Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["personal", "email", "inbox-zero", "gmail", "automation", "vietnamese"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "personal-workflow",
+    "usage": "Workflow tự động phân loại và xử lý email để đạt Inbox Zero. Quan trọng emails được giữ lại, emails khác được archive."
+  }
+}

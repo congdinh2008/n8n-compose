@@ -1,0 +1,144 @@
+{
+  "name": "Common: Data Validator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "data-validator",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "validator-input",
+      "name": "Input Data",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "data-validator",
+      "notes": "Nhận data cần validate. Body: { data: {...}, requiredFields: ['email', 'name'], rules: {...} }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Data Validator Pattern\n// Validate input data trước khi xử lý\n\nconst input = $input.first().json;\nconst data = input.data || input;\nconst requiredFields = input.requiredFields || ['email', 'name'];\nconst rules = input.rules || {};\n\nconst errors = [];\nconst warnings = [];\n\n// 1. Check required fields\nconst missingFields = requiredFields.filter(field => {\n  const value = data[field];\n  return value === undefined || value === null || value === '';\n});\n\nif (missingFields.length > 0) {\n  errors.push(`Missing required fields: ${missingFields.join(', ')}`);\n}\n\n// 2. Validate email format\nif (data.email) {\n  const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n  if (!emailRegex.test(data.email)) {\n    errors.push('Invalid email format');\n  }\n}\n\n// 3. Validate phone number (Vietnamese format)\nif (data.phone) {\n  const phoneRegex = /^(\\+84|0)[0-9]{9,10}$/;\n  if (!phoneRegex.test(data.phone.replace(/[\\s-]/g, ''))) {\n    warnings.push('Phone number may not be in Vietnamese format. Expected: +84XXXXXXXXX or 0XXXXXXXXXX');\n  }\n}\n\n// 4. Validate date format\nif (data.date) {\n  const parsedDate = new Date(data.date);\n  if (isNaN(parsedDate.getTime())) {\n    errors.push('Invalid date format. Expected: YYYY-MM-DD or ISO string');\n  }\n}\n\n// 5. Check string length limits\nif (rules.maxLength) {\n  for (const [field, maxLen] of Object.entries(rules.maxLength)) {\n    if (data[field] && data[field].length > maxLen) {\n      errors.push(`Field '${field}' exceeds max length of ${maxLen}`);\n    }\n  }\n}\n\n// 6. Check numeric ranges\nif (rules.range) {\n  for (const [field, range] of Object.entries(rules.range)) {\n    const value = Number(data[field]);\n    if (!isNaN(value) && (value < range.min || value > range.max)) {\n      errors.push(`Field '${field}' must be between ${range.min} and ${range.max}`);\n    }\n  }\n}\n\n// 7. Sanitize strings (remove XSS-like patterns)\nconst sanitized = { ...data };\nfor (const [key, value] of Object.entries(data)) {\n  if (typeof value === 'string') {\n    sanitized[key] = value\n      .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n      .replace(/javascript:/gi, '')\n      .replace(/on\\w+\\s*=/gi, '')\n      .trim();\n  }\n}\n\nconst isValid = errors.length === 0;\n\nreturn [{\n  json: {\n    valid: isValid,\n    data: sanitized,\n    errors,\n    warnings,\n    errorCount: errors.length,\n    warningCount: warnings.length,\n    validatedFields: Object.keys(data),\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "validate-data",
+      "name": "Validate & Sanitize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Validate required fields, email, phone (VN format), date, length limits. Sanitize strings để tránh XSS."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "valid-check",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "validation-result",
+      "name": "IF: Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Nếu valid → tiếp tục xử lý. Nếu không → trả về lỗi."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"error\": \"Validation failed\",\n  \"details\": $json.errors,\n  \"warnings\": $json.warnings\n}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "return-error",
+      "name": "Return Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1000, 450],
+      "notes": "Trả về HTTP 400 với chi tiết lỗi validation."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"data\": $json.data,\n  \"warnings\": $json.warnings\n}",
+        "options": {}
+      },
+      "id": "return-success",
+      "name": "Return Validated Data",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1000, 150],
+      "notes": "Trả về data đã validated và sanitized."
+    }
+  ],
+  "connections": {
+    "Input Data": {
+      "main": [
+        [
+          {
+            "node": "Validate & Sanitize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Sanitize": {
+      "main": [
+        [
+          {
+            "node": "IF: Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Valid?": {
+      "main": [
+        [
+          {
+            "node": "Return Validated Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["common", "validation", "data-quality", "reusable", "security"],
+  "triggerCount": 0,
+  "versionId": "1.0.0",
+  "meta": {
+    "instanceId": "common-pattern",
+    "usage": "Import và dùng làm node đầu tiên sau Webhook. Dùng để validate input trước khi xử lý.",
+    "example": "POST { data: { email: 'test@example.com', name: 'Test' }, requiredFields: ['email', 'name'] }"
+  }
+}

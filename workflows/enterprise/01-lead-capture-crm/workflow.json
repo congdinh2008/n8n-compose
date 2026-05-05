@@ -1,0 +1,387 @@
+{
+  "name": "Enterprise: Lead Capture & CRM",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-capture",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook (Form Submission)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "lead-capture-webhook",
+      "notes": "🌐 Webhook: Nhận lead từ website form. POST body: { name, email, phone, source, message }. URL: https://n8n.yourdomain.com/webhook/lead-capture. ⚙️ responseMode = responseNode để trả kết quả về cho user."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate Lead Data\n// Kiểm tra dữ liệu đầu vào cho lead VN\n\nconst lead = $input.first().json.body || $input.first().json;\n\nconst errors = [];\nconst requiredFields = ['name', 'email', 'phone'];\n\n// Check required fields\nfor (const field of requiredFields) {\n  if (!lead[field] || lead[field].trim() === '') {\n    errors.push(`Thiếu trường bắt buộc: ${field}`);\n  }\n}\n\n// Validate email\nif (lead.email) {\n  const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n  if (!emailRegex.test(lead.email)) {\n    errors.push('Email không hợp lệ');\n  }\n}\n\n// Validate Vietnamese phone\nif (lead.phone) {\n  const phoneRegex = /^(\\+84|0)[0-9]{9,10}$/;\n  const cleanPhone = lead.phone.replace(/[\\s\\-\\.]/g, '');\n  if (!phoneRegex.test(cleanPhone)) {\n    errors.push('Số điện thoại không hợp lệ. Định dạng: +84XXXXXXXXX hoặc 0XXXXXXXXXX');\n  }\n  lead.phone = cleanPhone; // Normalize phone\n}\n\n// Set defaults\nlead.source = lead.source || 'website';\nlead.status = 'new';\nlead.created_at = new Date().toISOString();\nlead.vietnam_time = new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' });\n\n// Lead scoring based on source\nconst sourceScores = {\n  'referral': 90,\n  'website': 70,\n  'facebook': 60,\n  'google': 65,\n  'ads': 50,\n  'event': 80,\n  'email': 40\n};\nlead.lead_score = sourceScores[lead.source.toLowerCase()] || 50;\n\n// Priority based on score\nlead.priority = lead.lead_score >= 80 ? 'high' : \n                lead.lead_score >= 60 ? 'medium' : 'low';\n\nif (errors.length > 0) {\n  return [{\n    json: {\n      valid: false,\n      errors,\n      statusCode: 400\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    valid: true,\n    lead,\n    statusCode: 200\n  }\n}];"
+      },
+      "id": "validate-lead",
+      "name": "Validate & Score Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "✅ Validate required fields, email, phone (VN format). Lead scoring theo nguồn: Referral=90, Event=80, Website=70, Google=65, Facebook=60, Ads=50, Email=40. Priority: High(≥80), Medium(≥60), Low(<60)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "valid-check",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-valid",
+      "name": "IF: Valid Data?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Nếu data không hợp lệ → Trả về lỗi 400. Nếu hợp lệ → Kiểm tra duplicate."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"error\": \"Dữ liệu không hợp lệ\",\n  \"details\": $json.errors\n}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "return-error",
+      "name": "Return Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1000, 500],
+      "notes": "Trả về HTTP 400 cho webhook caller với chi tiết lỗi validation."
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "column": "Email",
+              "value": "={{ $json.lead.email }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "check-duplicate",
+      "name": "Check Duplicate (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1000, 150],
+      "notes": "🔍 Tìm lead theo email trong Google Sheets. ⚙️ Cần: Sheet ID + Credential. Sheet có column: Email, Name, Phone, Source, Status, Created_At."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if duplicate exists\nconst existingLeads = $input.all();\nconst newLead = $('Validate & Score Lead').first().json.lead;\n\nif (existingLeads.length > 0) {\n  // Duplicate found\n  const existing = existingLeads[0].json;\n  return [{\n    json: {\n      is_duplicate: true,\n      existing_record: existing,\n      new_lead: newLead,\n      action: 'update',\n      message: `Lead đã tồn tại: ${existing.Email || existing.email}`\n    }\n  }];\n} else {\n  // New lead\n  return [{\n    json: {\n      is_duplicate: false,\n      new_lead: newLead,\n      action: 'create',\n      message: 'Lead mới - cần tạo record'\n    }\n  }];\n}"
+      },
+      "id": "duplicate-check",
+      "name": "Determine: New or Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 150],
+      "notes": "So sánh kết quả search từ Sheets. Nếu có kết quả → duplicate. Nếu không → lead mới."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "duplicate-check",
+              "leftValue": "={{ $json.is_duplicate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-duplicate",
+      "name": "IF: Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1500, 150],
+      "notes": "Nếu duplicate → Update record + Log. Nếu mới → Create + Welcome + Notify."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $json.new_lead.name }}",
+            "Phone": "={{ $json.new_lead.phone }}",
+            "Source": "={{ $json.new_lead.source }}",
+            "Lead_Score": "={{ $json.new_lead.lead_score }}",
+            "Last_Contact": "={{ $json.new_lead.vietnam_time }}",
+            "Status": "={{ $json.new_lead.status }}"
+          },
+          "matchingColumns": ["Email"]
+        },
+        "options": {}
+      },
+      "id": "update-lead",
+      "name": "Update Existing Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1750, 50],
+      "notes": "📝 Update thông tin lead hiện tại (phone, source, last_contact). Match theo Email column."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $json.new_lead.name }}",
+            "Email": "={{ $json.new_lead.email }}",
+            "Phone": "={{ $json.new_lead.phone }}",
+            "Source": "={{ $json.new_lead.source }}",
+            "Message": "={{ $json.new_lead.message || '' }}",
+            "Status": "={{ $json.new_lead.status }}",
+            "Lead_Score": "={{ $json.new_lead.lead_score }}",
+            "Priority": "={{ $json.new_lead.priority }}",
+            "Created_At": "={{ $json.new_lead.created_at }}",
+            "Vietnam_Time": "={{ $json.new_lead.vietnam_time }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "id": "create-lead",
+      "name": "Create New Lead (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1750, 250],
+      "notes": "➕ Tạo lead mới trong Google Sheets. Columns: Name, Email, Phone, Source, Message, Status, Lead_Score, Priority, Created_At."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.new_lead.email }}",
+        "subject": "Cảm ơn bạn đã quan tâm! 🎉",
+        "message": "=Chào {{ $json.new_lead.name }},\n\nCảm ơn bạn đã liên hệ với chúng tôi!\n\nChúng tôi đã nhận được thông tin và đội ngũ tư vấn sẽ liên hệ lại với bạn trong vòng 24 giờ.\n\n📞 Hotline: 1900 XXXX\n📧 Email: support@company.com\n\nTrân trọng,\nĐội ngũ CSKH",
+        "options": {}
+      },
+      "id": "welcome-email",
+      "name": "Send Welcome Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2000, 250],
+      "notes": "📧 Gửi email chào mừng tự động. Customize nội dung theo công ty. ⚙️ Cần Gmail OAuth2 credential."
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=🎉 *Lead mới!*\n\n*Họ tên:* {{ $json.new_lead.name }}\n*Email:* {{ $json.new_lead.email }}\n*SĐT:* {{ $json.new_lead.phone }}\n*Nguồn:* {{ $json.new_lead.source }}\n*Điểm:* {{ $json.new_lead.lead_score }} ({{ $json.new_lead.priority }})\n*Thời gian:* {{ $json.new_lead.vietnam_time }}\n\n👉 Phân loại: {{ $json.new_lead.priority === 'high' ? '🔴 Xử lý ngay' : $json.new_lead.priority === 'medium' ? '🟡 Ưu tiên' : '🟢 Bình thường' }}",
+        "additionalFields": {}
+      },
+      "id": "notify-slack",
+      "name": "Notify Sales Team (Slack/Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [2250, 250],
+      "notes": "📱 Notify cho team sales. Có thể dùng Slack node thay Telegram. Phân loại priority: High=🔴, Medium=🟡, Low=🟢."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Route lead theo source\nconst lead = $json.new_lead || $json.existing_record;\nconst source = (lead.source || 'website').toLowerCase();\n\nconst routing = {\n  'website': { team: 'sales', channel: '#sales-website' },\n  'referral': { team: 'sales', channel: '#sales-referral' },\n  'facebook': { team: 'marketing', channel: '#marketing-fb' },\n  'google': { team: 'marketing', channel: '#marketing-ads' },\n  'ads': { team: 'ads', channel: '#ads-team' },\n  'event': { team: 'sales', channel: '#sales-events' },\n  'email': { team: 'marketing', channel: '#marketing-email' }\n};\n\nconst route = routing[source] || routing.website;\n\nreturn [{\n  json: {\n    lead,\n    route,\n    message: `Lead routed to ${route.team} team in ${route.channel}`\n  }\n}];"
+      },
+      "id": "route-lead",
+      "name": "Route Lead by Source",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 450],
+      "notes": "🔀 Phân loại lead theo nguồn: Website→Sales, Referral→Sales, Facebook→Marketing, Google→Marketing Ads, Event→Sales, Email→Marketing. Customize routing theo cơ cấu team."
+    }
+  ],
+  "connections": {
+    "Webhook (Form Submission)": {
+      "main": [
+        [
+          {
+            "node": "Validate & Score Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Score Lead": {
+      "main": [
+        [
+          {
+            "node": "IF: Valid Data?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Valid Data?": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate (Google Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate (Google Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Determine: New or Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine: New or Duplicate": {
+      "main": [
+        [
+          {
+            "node": "IF: Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Update Existing Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create New Lead (Google Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create New Lead (Google Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Send Welcome Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Welcome Email": {
+      "main": [
+        [
+          {
+            "node": "Notify Sales Team (Slack/Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Existing Lead": {
+      "main": [
+        [
+          {
+            "node": "Route Lead by Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["enterprise", "crm", "lead-capture", "sales", "vietnamese"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-workflow"
+  }
+}

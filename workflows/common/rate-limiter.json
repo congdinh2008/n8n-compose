@@ -1,0 +1,142 @@
+{
+  "name": "Common: Rate Limiter",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rate-limiter",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "rate-input",
+      "name": "Input Data",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "rate-limiter",
+      "notes": "Nhận data cần xử lý. Body: { items: [...], rateLimit: 10 } (requests per second)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Rate Limiter Pattern\n// Giới hạn số lượng request/giây để tránh bị 429 Too Many Requests\n\nconst input = $input.first().json;\nconst items = input.items || [$input.first().json];\nconst RATE_LIMIT = input.rateLimit || 10; // requests per second\nconst BATCH_SIZE = RATE_LIMIT; // số items mỗi batch\n\n// Chia items thành các batch\nconst batches = [];\nfor (let i = 0; i < items.length; i += BATCH_SIZE) {\n  batches.push({\n    batch_index: batches.length,\n    total_batches: Math.ceil(items.length / BATCH_SIZE),\n    items: items.slice(i, i + BATCH_SIZE),\n    delay_ms: batches.length * 1000 // delay tăng dần theo batch\n  });\n}\n\nconsole.log(`Total items: ${items.length}`);\nconsole.log(`Batch size: ${BATCH_SIZE}`);\nconsole.log(`Total batches: ${batches.length}`);\n\n// Trả về batch đầu tiên, các batch sau sẽ được xử lý qua Loop\nreturn [{ json: batches[0] }];"
+      },
+      "id": "split-batches",
+      "name": "Split into Batches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Chia dữ liệu thành các batch theo rate limit. Mỗi batch = RATE_LIMIT items."
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "id": "delay-node",
+      "name": "Wait 1 Second",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1000, 300],
+      "notes": "⚠️ Community note: Wait node hoạt động tốt. Đảm bảo workflow được active để wait hoạt động."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check còn batch nào không\nconst currentBatch = $input.first().json;\nconst allBatches = $('Split into Batches').all()[0].json;\n\nconst nextBatchIndex = currentBatch.batch_index + 1;\nconst hasNext = nextBatchIndex < allBatches.total_batches;\n\nreturn [{\n  json: {\n    has_more: hasNext,\n    next_batch_index: nextBatchIndex,\n    total_batches: allBatches.total_batches,\n    current_progress: `${currentBatch.batch_index + 1}/${allBatches.total_batches}`\n  }\n}];"
+      },
+      "id": "check-more",
+      "name": "IF: More Batches?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "notes": "Kiểm tra xem còn batch cần xử lý không. Nếu còn → Loop lại."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-more-check",
+              "leftValue": "={{ $json.has_more }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "has-more-if",
+      "name": "IF: Has More?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1500, 300],
+      "notes": "Nếu còn batch → quay lại Split Batches. Nếu hết → Done."
+    }
+  ],
+  "connections": {
+    "Input Data": {
+      "main": [
+        [
+          {
+            "node": "Split into Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split into Batches": {
+      "main": [
+        [
+          {
+            "node": "Wait 1 Second",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 1 Second": {
+      "main": [
+        [
+          {
+            "node": "IF: More Batches?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: More Batches?": {
+      "main": [
+        [
+          {
+            "node": "IF: Has More?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["common", "rate-limiting", "batch-processing", "reusable"],
+  "triggerCount": 0,
+  "versionId": "1.0.0",
+  "meta": {
+    "instanceId": "common-pattern",
+    "usage": "Import vào workflow cần rate limiting. Kết nối output của node cần throttle vào Input Data webhook."
+  }
+}

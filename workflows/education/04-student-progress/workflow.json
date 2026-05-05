@@ -1,0 +1,177 @@
+{
+  "name": "Education: Student Progress Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 17,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (Weekly Friday 5 PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "notes": "⚙️ Cấu hình: Chạy mỗi thứ 6 lúc 5:00 PM để gửi báo cáo tiến độ tuần."
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "read-grades",
+      "name": "Read Student Grades",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [500, 300],
+      "notes": "⚠️ Đọc điểm số từ gradebook sheet. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate student progress report\nconst grades = $input.all().map(item => item.json);\nconst now = new Date();\nconst weekStart = new Date(now.getTime() - 7 * 86400000);\n\n// Filter grades from this week\nconst weeklyGrades = grades.filter(g => {\n  const gradedDate = new Date(g.graded_at || g.date);\n  return gradedDate >= weekStart;\n});\n\n// Group by student\nconst studentProgress = {};\n\nweeklyGrades.forEach(grade => {\n  const email = grade.student_email;\n  if (!studentProgress[email]) {\n    studentProgress[email] = {\n      name: grade.student_name,\n      email,\n      quizzes: [],\n      total_score: 0,\n      count: 0\n    };\n  }\n  \n  studentProgress[email].quizzes.push({\n    score: parseFloat(grade.score) || 0,\n    grade: grade.grade,\n    passed: grade.passed === true || grade.passed === 'true',\n    date: grade.graded_at\n  });\n  \n  studentProgress[email].total_score += parseFloat(grade.score) || 0;\n  studentProgress[email].count++;\n});\n\n// Calculate averages\nconst students = Object.values(studentProgress).map(student => ({\n  ...student,\n  average_score: student.count > 0 ? (student.total_score / student.count).toFixed(1) : 0,\n  average_grade: student.count > 0 ? \n    (student.total_score / student.count >= 90 ? 'A' :\n     student.total_score / student.count >= 80 ? 'B' :\n     student.total_score / student.count >= 70 ? 'C' :\n     student.total_score / student.count >= 60 ? 'D' : 'F') : 'N/A',\n  pass_rate: student.count > 0 ? \n    ((student.quizzes.filter(q => q.passed).length / student.count) * 100).toFixed(0) : 0,\n  quiz_count: student.count\n}));\n\nconsole.log(`Generated progress for ${students.length} students`);\n\nreturn [{\n  json: {\n    students,\n    total_students: students.length,\n    week_ending: now.toISOString().split('T')[0],\n    generated_at: now.toISOString(),\n    timezone: 'Asia/Ho_Chi_Minh'\n  }\n}];"
+      },
+      "id": "calculate-progress",
+      "name": "Calculate Progress",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Tính điểm trung bình, pass rate cho mỗi học sinh trong tuần."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format progress report email\nconst report = $input.first().json;\n\nconst studentSummaries = report.students.map((s, i) => {\n  const status = parseFloat(s.average_score) >= 50 ? '✅' : '⚠️';\n  return `${status} ${i + 1}. ${s.name}\n   Điểm TB: ${s.average_score}% | Đánh giá: ${s.average_grade}\n   Số quiz: ${s.quiz_count} | Tỷ lệ đạt: ${s.pass_rate}%`;\n}).join('\\n\\n');\n\nconst emailBody = `Chào team,\n\nĐây là báo cáo tiến độ học tập tuần kết thúc ngày ${report.week_ending}:\n\n━━━━━━━━━━━━━━━━━━━━\n📊 TỔNG QUAN\n━━━━━━━━━━━━━━━━━━━━\n\nTổng học sinh: ${report.total_students}\n\n━━━━━━━━━━━━━━━━━━━━\n📈 CHI TIẾT THEO HỌC SINH\n━━━━━━━━━━━━━━━━━━━━\n\n${studentSummaries}\n\n━━━━━━━━━━━━━━━━━━━━\n\nXem chi tiết tại Google Sheets.\n\nTrân trọng,\nHệ thống Quản lý Học tập`;\n\nreturn [{\n  json: {\n    to: '', // Điền email giảng viên/quản lý\n    subject: `📊 Báo cáo Tiến độ Tuần - ${report.week_ending}`,\n    body: emailBody,\n    report_data: report\n  }\n}];"
+      },
+      "id": "format-report",
+      "name": "Format Progress Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "notes": "Tạo email báo cáo tiến độ với tóm tắt từng học sinh."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Progress Report Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 150],
+      "notes": "⚠️ Gửi báo cáo cho giảng viên/quản lý. Điền email vào 'to'. Cần Gmail OAuth2."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "week_ending": "={{ $json.report_data.week_ending }}",
+            "total_students": "={{ $json.report_data.total_students }}",
+            "generated_at": "={{ $json.report_data.generated_at }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-report",
+      "name": "Log Report to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1250, 450],
+      "notes": "⚠️ Lưu lịch sử báo cáo vào Sheets. Cần Sheet ID."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Weekly Friday 5 PM)": {
+      "main": [
+        [
+          {
+            "node": "Read Student Grades",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Student Grades": {
+      "main": [
+        [
+          {
+            "node": "Calculate Progress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Progress": {
+      "main": [
+        [
+          {
+            "node": "Format Progress Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Progress Report": {
+      "main": [
+        [
+          {
+            "node": "Send Progress Report Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Report to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["education", "progress", "reporting", "weekly", "students"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "education-workflow"
+  }
+}

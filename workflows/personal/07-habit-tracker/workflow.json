@@ -1,0 +1,200 @@
+{
+  "name": "Personal: Habit Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "everyHour",
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (Daily 9 PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "notes": "⚙️ Cấu hình: Chạy hàng ngày lúc 9:00 PM (21:00). Đổi thành 'everyDay' và set triggerAtHour = 21"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "read-habits",
+      "name": "Read Habit Tracker Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [500, 300],
+      "notes": "⚠️ Đọc Google Sheets tracking habits. Columns: habit, target, completed, streak, last_completed. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Habit Tracker - Check daily completion and update streaks\nconst habits = $input.all().map(item => item.json);\nconst today = new Date().toISOString().split('T')[0];\nconst yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];\n\nconst results = habits.map(habit => {\n  const lastCompleted = habit.last_completed || '';\n  const currentStreak = parseInt(habit.streak) || 0;\n  const isCompletedToday = lastCompleted === today;\n  const wasCompletedYesterday = lastCompleted === yesterday;\n  \n  let newStreak = currentStreak;\n  let status = 'pending';\n  let message = '';\n  \n  if (isCompletedToday) {\n    // Already completed today\n    status = 'completed';\n    message = `✅ ${habit.habit}: Đã hoàn thành hôm nay! (Streak: ${currentStreak} ngày)`;\n  } else if (wasCompletedYesterday) {\n    // Completed yesterday, streak is at risk\n    status = 'at_risk';\n    message = `⚠️ ${habit.habit}: Hôm qua đã làm, hôm nay chưa làm! (Streak hiện tại: ${currentStreak} ngày)`;\n  } else if (lastCompleted && lastCompleted !== today) {\n    // Streak broken\n    newStreak = 0;\n    status = 'broken';\n    message = `❌ ${habit.habit}: Streak bị đứt! (Streak cũ: ${currentStreak} ngày). Hãy bắt đầu lại!`;\n  } else {\n    // Never started\n    status = 'not_started';\n    message = `📝 ${habit.habit}: Chưa bắt đầu. Mục tiêu: ${habit.target || 'Daily'}`;\n  }\n  \n  return {\n    habit: habit.habit,\n    target: habit.target || 'Daily',\n    status,\n    streak: newStreak,\n    last_completed: lastCompleted,\n    message\n  };\n});\n\nconst summary = {\n  completed: results.filter(r => r.status === 'completed').length,\n  at_risk: results.filter(r => r.status === 'at_risk').length,\n  broken: results.filter(r => r.status === 'broken').length,\n  not_started: results.filter(r => r.status === 'not_started').length\n};\n\nconsole.log(`Habit Check: ${summary.completed}/${results.length} completed today`);\n\nreturn [{ json: { habits: results, summary, date: today } }];"
+      },
+      "id": "check-habits",
+      "name": "Check Habit Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Kiểm tra trạng thái mỗi habit: completed, at_risk, broken, not_started. Update streaks."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format evening report message\nconst report = $input.first().json;\n\nconst habitMessages = report.habits.map(h => h.message).join('\\n');\n\nconst motivationalMessages = [\n  \"💪 Không sao, ngày mới sẽ tốt hơn!\",\n  \"🌟 Mỗi ngày là một cơ hội mới!\",\n  \"🎯 Hãy tập trung vào progress, không phải perfection!\",\n  \"✨ Bạn đang làm tốt lắm! Continue!\",\n  \"🔥 Streak không quan trọng bằng consistency!\"\n];\n\nconst randomMotivation = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];\n\nlet urgencyLevel = 'low';\nif (report.summary.broken > 0) urgencyLevel = 'high';\nelse if (report.summary.at_risk > 0) urgencyLevel = 'medium';\n\nconst message = `📊 Habit Tracker - ${report.date}\n\n━━━━━━━━━━━━━━━━━━━━\n${habitMessages}\n━━━━━━━━━━━━━━━━━━━━\n\n📈 Summary:\n✅ Completed: ${report.summary.completed}\n⚠️ At Risk: ${report.summary.at_risk}\n❌ Broken: ${report.summary.broken}\n📝 Not Started: ${report.summary.not_started}\n\n${urgencyLevel !== 'low' ? randomMotivation : '🎉 Tuyệt vời! Giữ vững phong độ!'}`;\n\nreturn [{\n  json: {\n    message,\n    urgency: urgencyLevel,\n    summary: report.summary,\n    date: report.date\n  }\n}];"
+      },
+      "id": "format-report",
+      "name": "Format Evening Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "notes": "Tạo báo cáo buổi tối với status của tất cả habits và motivational message."
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ $json.message }}",
+        "additionalFields": {}
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1250, 150],
+      "notes": "⚠️ Gửi báo cáo hàng ngày qua Telegram. Cần bot token và chat_id."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "high-urgency",
+              "leftValue": "={{ $json.urgency }}",
+              "rightValue": "high",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-urgent",
+      "name": "IF: High Urgency?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1250, 450],
+      "notes": "Nếu có nhiều streaks bị đứt → gửi thêm email alert để nhắc nhở mạnh hơn."
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "⚠️ Habit Alert - Streaks Broken!",
+        "message": "={{ $json.message }}\n\n🚨 Một số habits của bạn đã bị đứt streak! Hãy xem xét và bắt đầu lại ngay nhé!",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email Alert (If Urgent)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1500, 450],
+      "notes": "⚠️ Gửi email alert khi có streaks bị đứt. Điền email của bạn vào 'sendTo'."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Daily 9 PM)": {
+      "main": [
+        [
+          {
+            "node": "Read Habit Tracker Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Habit Tracker Sheet": {
+      "main": [
+        [
+          {
+            "node": "Check Habit Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Habit Status": {
+      "main": [
+        [
+          {
+            "node": "Format Evening Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Evening Report": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF: High Urgency?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: High Urgency?": {
+      "main": [
+        [
+          {
+            "node": "Send Email Alert (If Urgent)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["personal", "habits", "tracking", "daily", "productivity"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "personal-workflow"
+  }
+}

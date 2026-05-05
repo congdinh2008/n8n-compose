@@ -1,0 +1,296 @@
+{
+  "name": "Personal: Subscription Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "triggerAtDay": 1,
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule (Monthly 1st, 9 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "notes": "⏰ Trigger: Chạy ngày 1 hàng tháng lúc 9:00 AM (giờ VN). ⚙️ Đổi triggerAtHour = 8 nếu muốn 8 AM."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Subscription Tracker - Known Subscriptions Database\n// Danh sách các dịch vụ subscription phổ biến tại VN\n\nconst knownSubscriptions = [\n  { name: 'Netflix', category: 'Giải trí', expected_range: [70000, 260000], currency: 'VND' },\n  { name: 'Spotify', category: 'Âm nhạc', expected_range: [59000, 85000], currency: 'VND' },\n  { name: 'YouTube Premium', category: 'Giải trí', expected_range: [59000, 100000], currency: 'VND' },\n  { name: 'Google One', category: 'Lưu trữ', expected_range: [20000, 300000], currency: 'VND' },\n  { name: 'iCloud', category: 'Lưu trữ', expected_range: [25000, 250000], currency: 'VND' },\n  { name: 'Grab', category: 'Đi lại', expected_range: [0, 500000], currency: 'VND' },\n  { name: 'Shopee', category: 'Mua sắm', expected_range: [0, 200000], currency: 'VND' },\n  { name: 'Apple Music', category: 'Âm nhạc', expected_range: [59000, 100000], currency: 'VND' },\n  { name: 'Disney+', category: 'Giải trí', expected_range: [139000, 360000], currency: 'VND' },\n  { name: 'FPT Play', category: 'Giải trí', expected_range: [49000, 120000], currency: 'VND' },\n  { name: 'Viettel', category: 'Viễn thông', expected_range: [50000, 500000], currency: 'VND' },\n  { name: 'VNPT', category: 'Viễn thông', expected_range: [100000, 500000], currency: 'VND' },\n  { name: 'Fiber', category: 'Internet', expected_range: [150000, 500000], currency: 'VND' }\n];\n\nreturn [{\n  json: {\n    known_subscriptions: knownSubscriptions,\n    current_month: new Date().toISOString().slice(0, 7),\n    report_date: new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' })\n  }\n}];"
+      },
+      "id": "load-subscriptions",
+      "name": "Load Known Subscriptions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "📋 Load danh sách subscription đã biết với price range. Customize danh sách này theo subscriptions thực tế của bạn. expected_range = [min, max] VND."
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "fetch-subs-sheet",
+      "name": "Fetch Subscriptions from Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [750, 300],
+      "notes": "📊 Lấy danh sách subscriptions hiện tại từ Google Sheets. ⚙️ Cần: Sheet ID + Credential. Sheet columns: Name, Category, Amount, Frequency, Last_Charged, Status."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse bank emails for recurring charges\n// Tìm các giao dịch định kỳ từ email ngân hàng\n\n// TODO: Thực tế cần Email Trigger node để fetch emails\n// Đây là mock data - thay thế bằng email parsing thực tế\n\nconst bankTransactions = [\n  // Mock data - ví dụ giao dịch hàng tháng\n  { date: '2026-05-01', merchant: 'Netflix', amount: 129000, description: 'Netflix Subscription' },\n  { date: '2026-05-03', merchant: 'Spotify', amount: 59000, description: 'Spotify Premium' },\n  { date: '2026-05-05', merchant: 'Google One', amount: 79000, description: 'Google Storage' },\n  { date: '2026-05-01', merchant: 'Viettel', amount: 200000, description: 'Mobile Plan' }\n];\n\nconst currentSubscriptions = $('Fetch Subscriptions from Sheets').all()[0]?.json || [];\nconst knownSubs = $('Load Known Subscriptions').first().json.known_subscriptions;\n\nreturn [{\n  json: {\n    transactions: bankTransactions,\n    current_subscriptions: currentSubscriptions,\n    known_subscriptions: knownSubs\n  }\n}];"
+      },
+      "id": "parse-transactions",
+      "name": "Parse Bank Transactions (Mock)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "notes": "💳 Parse giao dịch từ email ngân hàng. ⚠️ MOCK DATA - Thay thế bằng email trigger thực tế. TODO: Kết nối Email Trigger node, parse body regex để extract amount + merchant."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze subscriptions - find changes\nconst data = $input.first().json;\nconst transactions = data.transactions;\nconst currentSubs = data.current_subscriptions;\nconst knownSubs = data.known_subscriptions;\n\nconst report = {\n  total_monthly_cost: 0,\n  new_subscriptions: [],\n  price_changes: [],\n  cancelled_subscriptions: [],\n  all_subscriptions: [],\n  warnings: []\n};\n\n// Match transactions with known subscriptions\nfor (const tx of transactions) {\n  const matched = knownSubs.find(k => \n    k.name.toLowerCase().includes(tx.merchant.toLowerCase()) ||\n    tx.merchant.toLowerCase().includes(k.name.toLowerCase())\n  );\n  \n  const category = matched ? matched.category : 'Khác';\n  \n  // Find in current subscriptions\n  const existing = currentSubs.find(s => \n    s.Name?.toLowerCase() === tx.merchant.toLowerCase() ||\n    s.Name?.toLowerCase().includes(tx.merchant.toLowerCase())\n  );\n  \n  if (!existing) {\n    // New subscription found\n    report.new_subscriptions.push({\n      name: tx.merchant,\n      amount: tx.amount,\n      category,\n      first_charged: tx.date\n    });\n  } else if (existing) {\n    // Check for price change\n    const existingAmount = parseFloat(existing.Amount) || 0;\n    if (existingAmount > 0 && Math.abs(tx.amount - existingAmount) / existingAmount > 0.1) {\n      const changePercent = ((tx.amount - existingAmount) / existingAmount * 100).toFixed(1);\n      report.price_changes.push({\n        name: tx.merchant,\n        old_amount: existingAmount,\n        new_amount: tx.amount,\n        change_percent: parseFloat(changePercent),\n        direction: tx.amount > existingAmount ? 'increase' : 'decrease'\n      });\n      \n      if (tx.amount > existingAmount) {\n        report.warnings.push(`⚠️ ${tx.merchant} tăng giá: ${changePercent}%`);\n      }\n    }\n  }\n  \n  report.total_monthly_cost += tx.amount;\n  report.all_subscriptions.push({\n    name: tx.merchant,\n    amount: tx.amount,\n    category,\n    last_charged: tx.date\n  });\n}\n\n// Check for cancelled subscriptions (in current but not in transactions)\nconst currentNames = currentSubs.map(s => s.Name?.toLowerCase());\nfor (const sub of currentSubs) {\n  const stillActive = transactions.some(tx => \n    tx.merchant.toLowerCase().includes(sub.Name?.toLowerCase()) ||\n    sub.Name?.toLowerCase().includes(tx.merchant.toLowerCase())\n  );\n  if (!stillActive && sub.Status === 'active') {\n    report.cancelled_subscriptions.push({\n      name: sub.Name,\n      last_amount: parseFloat(sub.Amount) || 0,\n      last_charged: sub.Last_Charged\n    });\n  }\n}\n\n// Check for unused subscriptions (> 30 days)\nfor (const sub of currentSubs) {\n  if (sub.Status === 'active' && sub.Last_Charged) {\n    const lastCharged = new Date(sub.Last_Charged);\n    const daysSince = (Date.now() - lastCharged.getTime()) / (1000 * 60 * 60 * 24);\n    if (daysSince > 60) {\n      report.warnings.push(`💤 ${sub.Name} không sử dụng ${Math.floor(daysSince)} ngày - xem xét hủy?`);\n    }\n  }\n}\n\nreturn [{\n  json: {\n    ...report,\n    report_date: new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }),\n    month: new Date().toISOString().slice(0, 7)\n  }\n}];"
+      },
+      "id": "analyze-subs",
+      "name": "Analyze Subscriptions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "notes": "🔍 Phân tích: tìm subscription mới, thay đổi giá (>10%), bị hủy, không sử dụng (>60 ngày). Tính tổng chi phí hàng tháng. Warnings cho price increases và unused subs."
+    },
+    {
+      "parameters": {
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $json.all_subscriptions[0]?.name || '' }}",
+            "Category": "={{ $json.all_subscriptions[0]?.category || '' }}",
+            "Amount": "={{ $json.all_subscriptions[0]?.amount || 0 }}",
+            "Last_Charged": "={{ $json.all_subscriptions[0]?.last_charged || '' }}",
+            "Status": "active",
+            "Updated_At": "={{ $json.report_date }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "update-subs",
+      "name": "Update Subscriptions Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1500, 300],
+      "notes": "📊 Update spreadsheet với subscriptions mới nhất. ⚙️ Clear sheet cũ, append data mới. Sheet columns: Name, Category, Amount, Last_Charged, Status, Updated_At."
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=📊 *BÁO CÁO SUBSCRIPTION HÀNG THÁNG*\n\n📅 Tháng: {{ $json.month }}\n💰 *Tổng chi phí: {{ $json.total_monthly_cost.toLocaleString('vi-VN') }} ₫/tháng*\n\n━━━━━━━━━━━━━━━━━━━━\n\n{{ #if $json.new_subscriptions.length }}\n🆕 *Subscription mới:*\n{{ $json.new_subscriptions.map(s => `• ${s.name}: ${s.amount.toLocaleString('vi-VN')} ₫`).join('\\n') }}\n{{ /if }}\n\n{{ #if $json.price_changes.length }}\n📈 *Thay đổi giá:*\n{{ $json.price_changes.map(p => `• ${p.name}: ${p.old_amount.toLocaleString('vi-VN')} → ${p.new_amount.toLocaleString('vi-VN')} ₫ (${p.change_percent > 0 ? '+' : ''}${p.change_percent}%)`).join('\\n') }}\n{{ /if }}\n\n{{ #if $json.cancelled_subscriptions.length }}\n❌ *Đã hủy:*\n{{ $json.cancelled_subscriptions.map(s => `• ${s.name} (${s.last_amount.toLocaleString('vi-VN')} ₫)`).join('\\n') }}\n{{ /if }}\n\n━━━━━━━━━━━━━━━━━━━━\n\n{{ #if $json.warnings.length }}\n⚠️ *Cảnh báo:*\n{{ $json.warnings.join('\\n') }}\n{{ /if }}\n\n💡 *Gợi ý:* Review các subscription không dùng đến để tiết kiệm chi phí.",
+        "additionalFields": {}
+      },
+      "id": "report-telegram",
+      "name": "Send Report (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1750, 150],
+      "notes": "📱 Gửi báo cáo hàng tháng qua Telegram bot. Format đẹp với emoji và phân nhóm. ⚙️ Cần bot token + chat_id."
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "=📊 Báo cáo Subscription tháng {{ $json.month }}",
+        "message": "=📊 BÁO CÁO SUBSCRIPTION HÀNG THÁNG\n\nTháng: {{ $json.month }}\nTổng chi phí: {{ $json.total_monthly_cost.toLocaleString('vi-VN') }} ₫/tháng\n\n🆕 Subscription mới:\n{{ $json.new_subscriptions.map(s => `• ${s.name}: ${s.amount.toLocaleString('vi-VN')} ₫`).join('\\n') || 'Không có' }}\n\n📈 Thay đổi giá:\n{{ $json.price_changes.map(p => `• ${p.name}: ${p.old_amount.toLocaleString('vi-VN')} → ${p.new_amount.toLocaleString('vi-VN')} ₫ (${p.change_percent}%)`).join('\\n') || 'Không có' }}\n\n❌ Đã hủy:\n{{ $json.cancelled_subscriptions.map(s => `• ${s.name}`).join('\\n') || 'Không có' }}\n\n⚠️ Cảnh báo:\n{{ $json.warnings.join('\\n') || 'Không có cảnh báo' }}\n\n💡 Gợi ý: Review các subscription không dùng đến.\n\nTrân trọng,\nExpense Tracker",
+        "options": {}
+      },
+      "id": "report-email",
+      "name": "Send Report (Email - Optional)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1750, 450],
+      "notes": "📧 Optional: Gửi báo cáo qua email. Có thể dùng thay thế hoặc bổ sung cho Telegram. Điền 'sendTo' = email của bạn."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "price-alert-check",
+              "leftValue": "={{ $json.price_changes.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "larger"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "price-alert",
+      "name": "IF: Price Increase Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 150],
+      "notes": "Nếu có tăng giá → gửi alert riêng. Nếu không → chỉ gửi báo cáo thường."
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "=🚨 *ALERT: Subscription tăng giá!*\n\n{{ $json.price_changes.filter(p => p.change_percent > 0).map(p => `*${p.name}*: ${p.old_amount.toLocaleString('vi-VN')} → ${p.new_amount.toLocaleString('vi-VN')} ₫ (+${p.change_percent}%)`).join('\\n') }}\n\n💡 Kiểm tra xem có nên hủy dịch vụ này không.",
+        "additionalFields": {}
+      },
+      "id": "urgent-alert",
+      "name": "Urgent Price Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [2250, 150],
+      "notes": "🚨 Alert riêng khi có tăng giá. Gửi ngay sau báo cáo thường. Nhắc user review subscription."
+    }
+  ],
+  "connections": {
+    "Schedule (Monthly 1st, 9 AM)": {
+      "main": [
+        [
+          {
+            "node": "Load Known Subscriptions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Known Subscriptions": {
+      "main": [
+        [
+          {
+            "node": "Fetch Subscriptions from Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Subscriptions from Sheets": {
+      "main": [
+        [
+          {
+            "node": "Parse Bank Transactions (Mock)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Bank Transactions (Mock)": {
+      "main": [
+        [
+          {
+            "node": "Analyze Subscriptions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Subscriptions": {
+      "main": [
+        [
+          {
+            "node": "Update Subscriptions Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Subscriptions Sheet": {
+      "main": [
+        [
+          {
+            "node": "Send Report (Telegram)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Report (Email - Optional)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Report (Telegram)": {
+      "main": [
+        [
+          {
+            "node": "IF: Price Increase Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Price Increase Alert?": {
+      "main": [
+        [
+          {
+            "node": "Urgent Price Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": {
+    "last_report_month": null
+  },
+  "tags": ["personal", "finance", "subscriptions", "tracking", "vietnamese"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "personal-workflow"
+  }
+}

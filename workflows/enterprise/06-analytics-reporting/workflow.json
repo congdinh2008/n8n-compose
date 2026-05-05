@@ -1,0 +1,194 @@
+{
+  "name": "Enterprise: Analytics Reporting",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (Daily 9 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "notes": "⚙️ Cấu hình: Chạy hàng ngày lúc 9:00 AM để lấy báo cáo ngày hôm trước."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analytics Reporting - Fetch data from multiple sources\n// Tổng hợp metrics từ các platforms\n\nconst now = new Date();\nconst yesterday = new Date(Date.now() - 86400000);\nconst dateStr = yesterday.toISOString().split('T')[0];\n\n// Initialize metrics structure\nconst metrics = {\n  date: dateStr,\n  email: { sent: 0, opens: 0, clicks: 0, unsubscribes: 0 },\n  social: { posts: 0, engagements: 0, followers_gained: 0 },\n  website: { visitors: 0, pageviews: 0, conversions: 0 },\n  ads: { spend: 0, impressions: 0, clicks: 0, ctr: 0 },\n  generated_at: now.toISOString(),\n  timezone: 'Asia/Ho_Chi_Minh'\n};\n\n// TODO: Replace with actual API calls\n// Email: SendGrid/Mailchimp API\n// Social: Twitter/LinkedIn/Facebook APIs\n// Website: Google Analytics API\n// Ads: Facebook/Google Ads API\n\nconsole.log(`Generated daily report for ${dateStr}`);\n\nreturn [{ json: metrics }];"
+      },
+      "id": "fetch-metrics",
+      "name": "Fetch All Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "📊 TODO: Thay thế bằng API calls thực tế. Hiện tại dùng mock data structure."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate formatted report\nconst metrics = $input.first().json;\n\n// Calculate totals and rates\nconst emailOpenRate = metrics.email.sent > 0 ? ((metrics.email.opens / metrics.email.sent) * 100).toFixed(2) : 0;\nconst emailClickRate = metrics.email.opens > 0 ? ((metrics.email.clicks / metrics.email.opens) * 100).toFixed(2) : 0;\nconst adCTR = metrics.ads.impressions > 0 ? ((metrics.ads.clicks / metrics.ads.impressions) * 100).toFixed(2) : 0;\n\nconst report = {\n  date: metrics.date,\n  summary: [\n    `📧 Email Marketing:`,
+    `   - Sent: ${metrics.email.sent}`,
+    `   - Open Rate: ${emailOpenRate}%`,
+    `   - Click Rate: ${emailClickRate}%`,
+    `   - Unsubscribes: ${metrics.email.unsubscribes}`,
+    ``,
+    `📱 Social Media:`,
+    `   - Posts: ${metrics.social.posts}`,
+    `   - Engagements: ${metrics.social.engagements}`,
+    `   - New Followers: ${metrics.social.followers_gained}`,
+    ``,
+    `🌐 Website:`,
+    `   - Visitors: ${metrics.website.visitors}`,
+    `   - Pageviews: ${metrics.website.pageviews}`,
+    `   - Conversions: ${metrics.website.conversions}`,
+    ``,
+    `💰 Ads:`,
+    `   - Spend: ${metrics.ads.spend.toLocaleString('vi-VN')}đ`,
+    `   - Impressions: ${metrics.ads.impressions}`,
+    `   - CTR: ${adCTR}%`
+  ].join('\\n'),\n  metrics,\n  generated_at: metrics.generated_at\n};\n\nreturn [{ json: report }];"
+      },
+      "id": "generate-report",
+      "name": "Generate Daily Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Tạo báo cáo formatted với tất cả metrics. Tính rates và percentages."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "date": "={{ $json.date }}",
+            "email_sent": "={{ $json.metrics.email.sent }}",
+            "email_opens": "={{ $json.metrics.email.opens }}",
+            "email_clicks": "={{ $json.metrics.email.clicks }}",
+            "social_posts": "={{ $json.metrics.social.posts }}",
+            "social_engagements": "={{ $json.metrics.social.engagements }}",
+            "website_visitors": "={{ $json.metrics.website.visitors }}",
+            "website_conversions": "={{ $json.metrics.website.conversions }}",
+            "ads_spend": "={{ $json.metrics.ads.spend }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-to-sheets",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1000, 300],
+      "notes": "⚠️ Lưu metrics hàng ngày vào Google Sheets để theo dõi trend. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "channel": "#marketing-reports",
+        "text": "📊 *Daily Marketing Report - {{ $json.date }}*\\n\\n{{ $json.summary }}\\n\\n_Xem chi tiết trong Google Sheets_",
+        "otherOptions": {}
+      },
+      "id": "send-slack",
+      "name": "Send Report to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1250, 150],
+      "notes": "⚠️ Gửi báo cáo tới Slack channel #marketing-reports. Cần Slack OAuth2."
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "📊 Daily Marketing Report - {{ $json.date }}",
+        "message": "=Chào team,\n\nĐây là báo cáo marketing hàng ngày:\n\n{{ $json.summary }}\n\n━━━━━━━━━━━━━━━━━━━━\n\nXem chi tiết tại: [Google Sheets Link]\n\nTrân trọng,\nMarketing Automation",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Report via Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 450],
+      "notes": "⚠️ Gửi báo cáo qua email. Điền email team vào 'sendTo'. Cần Gmail OAuth2."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Daily 9 AM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch All Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch All Metrics": {
+      "main": [
+        [
+          {
+            "node": "Generate Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Send Report to Slack",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Report via Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["enterprise", "analytics", "reporting", "marketing", "automation"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-workflow"
+  }
+}

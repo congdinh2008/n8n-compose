@@ -1,0 +1,256 @@
+{
+  "name": "Enterprise: Employee Onboarding",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-employee",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook (New Employee)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "employee-onboarding",
+      "notes": "📥 Nhận thông tin nhân viên mới từ HR. Body: { name, email, personal_email, department, role, start_date, manager, manager_email, address }. Response: { success: true, employee_id, status }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate employee data\nconst employee = $input.first().json.body || $input.first().json;\n\n// Required fields\nconst required = ['name', 'email', 'department', 'role', 'start_date', 'manager'];\nconst missing = required.filter(field => !employee[field]);\n\nif (missing.length > 0) {\n  throw new Error(`Missing required fields: ${missing.join(', ')}`);\n}\n\n// Validate email\nconst emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nif (!emailRegex.test(employee.email)) {\n  throw new Error('Invalid work email format');\n}\n\n// Format start date for Vietnamese locale\nconst startDate = new Date(employee.start_date);\nconst startDateFormatted = startDate.toLocaleDateString('vi-VN', {\n  weekday: 'long',\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric'\n});\n\n// Employee ID generation\nconst employeeId = `EMP-${Date.now().toString().slice(-6)}`;\n\nconst sanitized = {\n  employee_id: employeeId,\n  name: employee.name.trim(),\n  email: employee.email.toLowerCase().trim(),\n  personal_email: employee.personal_email?.toLowerCase().trim() || employee.email,\n  department: employee.department.trim(),\n  role: employee.role.trim().toLowerCase(),\n  start_date: employee.start_date,\n  start_date_formatted: startDateFormatted,\n  manager: employee.manager.trim(),\n  manager_email: employee.manager_email?.trim() || '',\n  address: employee.address?.trim() || 'Not provided',\n  status: 'onboarding_initiated',\n  created_at: new Date().toISOString(),\n  timezone: 'Asia/Ho_Chi_Minh',\n  accounts_created: [],\n  equipment_assigned: []\n};\n\nconsole.log(`Onboarding started for ${sanitized.name} (${sanitized.employee_id})`);\n\nreturn [{ json: sanitized }];"
+      },
+      "id": "validate-employee",
+      "name": "Validate Employee Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Validate required fields, email format, format start date tiếng Việt, tạo employee_id."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate welcome email content\nconst emp = $input.first().json;\n\nconst firstDayAgenda = `\n📅 Lịch trình ngày đầu tiên:\n\n9:00 AM  - Welcome meeting với HR\n10:00 AM - IT setup (laptop, accounts)\n11:00 AM - Team introductions\n12:00 PM - Lunch với team\n2:00 PM  - Role overview với manager: ${emp.manager}\n\n📍 Địa điểm: Văn phòng công ty / Remote\n\n📝 Mang theo:\n- CMND/CCCD\n- Thông tin ngân hàng (cho payroll)\n- Emergency contact details\n`;\n\nconst welcomeEmail = {\n  to: emp.personal_email, // Send to personal email before work email is active\n  cc: emp.manager_email,\n  subject: `🎉 Chào mừng ${emp.name} đến với đội ngũ công ty!`,\n  body: `Dear ${emp.name},\n\n🎉 Chúng tôi rất vui chào mừng bạn đến với đội ngũ!\n\n📅 Ngày bắt đầu: ${emp.start_date_formatted}\n🕐 Thời gian: 9:00 AM\n📍 Địa điểm: Văn phòng công ty / Remote\n\n📧 Tài khoản work email của bạn: ${emp.email}\n🔒 Mật khẩu tạm thời: Sẽ được gửi qua SMS/Zalo\n\n${firstDayAgenda}\n\nNếu bạn có bất kỳ câu hỏi nào trước ngày bắt đầu, vui lòng liên hệ:\n📧 HR: hr@company.com\n📞 Hotline: 1900-XXXX\n\nChào mừng bạn! 🚀\n\nTrân trọng,\nBộ phận Nhân sự`,\n  emp_data: emp\n};\n\nreturn [{ json: { ...welcomeEmail, ...emp } }];"
+      },
+      "id": "prepare-welcome",
+      "name": "Prepare Welcome Package",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Chuẩn bị welcome email với first-day agenda tiếng Việt. Gửi tới personal email trước khi work email active."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "send-welcome-email",
+      "name": "Send Welcome Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 150],
+      "notes": "⚠️ Gửi welcome email. Cần Gmail OAuth2. CC manager nếu có email."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Assign equipment based on role\nconst emp = $input.first().json;\n\n// Equipment mapping by role\nconst EQUIPMENT = {\n  standard: ['Laptop', 'Monitor', 'Keyboard', 'Mouse', 'Headset'],\n  developer: ['Laptop', 'Monitor', 'Keyboard', 'Mouse', 'Headset', 'Docking Station'],\n  designer: ['Laptop', 'Monitor', 'Keyboard', 'Mouse', 'Headset', 'Drawing Tablet'],\n  sales: ['Laptop', 'Headset', 'Mobile Phone'],\n  manager: ['Laptop', 'Monitor', 'Keyboard', 'Mouse', 'Headset']\n};\n\nconst roleEquipment = EQUIPMENT[emp.role] || EQUIPMENT.standard;\n\n// Equipment delivery date (3 days before start)\nconst deliveryDate = new Date(new Date(emp.start_date).getTime() - 3*24*60*60*1000);\n\nconst equipment = {\n  employee: emp.name,\n  employee_id: emp.employee_id,\n  department: emp.department,\n  role: emp.role,\n  equipment_list: roleEquipment,\n  delivery_address: emp.address,\n  delivery_date: deliveryDate.toISOString().split('T')[0],\n  start_date: emp.start_date,\n  status: 'pending_delivery'\n};\n\nconsole.log(`Equipment for ${emp.name} (${emp.role}): ${roleEquipment.join(', ')}`);\n\nreturn [{ json: { ...equipment, emp_data: emp } }];"
+      },
+      "id": "assign-equipment",
+      "name": "Assign Equipment by Role",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 450],
+      "notes": "Phân trang thiết bị theo role. Delivery 3 ngày trước start_date. Customize EQUIPMENT mapping theo nhu cầu."
+    },
+    {
+      "parameters": {
+        "channel": "#it-support",
+        "text": "💻 *Nhân viên mới - Equipment Setup*\n\n*Nhân viên:* {{ $json.employee }} ({{ $json.employee_id }})\n*Department:* {{ $json.department }}\n*Role:* {{ $json.role }}\n\n*Equipment cần chuẩn bị:*\n{{ $json.equipment_list.map(e => `• ${e}`).join('\\n') }}\n\n*Delivery:* {{ $json.delivery_date }}\n*Start Date:* {{ $json.start_date }}\n*Address:* {{ $json.delivery_address }}\n\n_Vui lòng setup trước ngày delivery!_",
+        "otherOptions": {}
+      },
+      "id": "notify-it-team",
+      "name": "Notify IT Team (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1250, 450],
+      "notes": "⚠️ Thông báo cho IT team chuẩn bị equipment. Cần Slack OAuth2 và channel #it-support."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.manager_email }}",
+        "subject": "👋 Nhân viên mới: {{ $json.name }} - {{ $json.start_date_formatted }}",
+        "message": "=Kính gửi {{ $json.manager }},\n\n👋 Bạn sẽ có nhân viên mới trong team:\n\n📋 Thông tin:\n- Họ tên: {{ $json.name }}\n- Employee ID: {{ $json.employee_id }}\n- Role: {{ $json.role }}\n- Department: {{ $json.department }}\n- Ngày bắt đầu: {{ $json.start_date_formatted }}\n\n📅 Lịch trình:\n- 9:00 AM: Welcome meeting với HR\n- 2:00 PM: Role overview với bạn\n\n💡 Chuẩn bị:\n- Review job description và onboarding plan\n- Chuẩn bị team introduction\n- Setup 1:1 meeting cho tuần đầu tiên\n\nTrân trọng,\nBộ phận Nhân sự",
+        "options": {}
+      },
+      "id": "notify-manager",
+      "name": "Notify Manager",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 650],
+      "notes": "⚠️ Thông báo cho manager về nhân viên mới. Cần Gmail OAuth2."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "employee_id": "={{ $json.employee_id }}",
+            "name": "={{ $json.name }}",
+            "email": "={{ $json.email }}",
+            "department": "={{ $json.department }}",
+            "role": "={{ $json.role }}",
+            "manager": "={{ $json.manager }}",
+            "start_date": "={{ $json.start_date }}",
+            "status": "onboarding_initiated",
+            "equipment": "={{ $json.equipment_list ? $json.equipment_list.join(', ') : '' }}",
+            "created_at": "={{ $json.created_at }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-onboarding",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1500, 300],
+      "notes": "⚠️ Log onboarding vào Google Sheets. Columns: employee_id, name, email, department, role, manager, start_date, status, equipment, created_at. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Employee onboarding initiated\",\n  \"employee_id\": \"{{ $('Validate Employee Data').first().json.employee_id }}\",\n  \"name\": \"{{ $('Validate Employee Data').first().json.name }}\",\n  \"start_date\": \"{{ $('Validate Employee Data').first().json.start_date }}\",\n  \"status\": \"onboarding_initiated\",\n  \"next_steps\": [\n    \"IT team notified for equipment setup\",\n    \"Welcome email sent to personal email\",\n    \"Manager notified\"\n  ]\n}",
+        "options": {}
+      },
+      "id": "response-node",
+      "name": "Return Onboarding Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1750, 300],
+      "notes": "Trả về response cho webhook caller với employee_id và status."
+    }
+  ],
+  "connections": {
+    "Webhook (New Employee)": {
+      "main": [
+        [
+          {
+            "node": "Validate Employee Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Employee Data": {
+      "main": [
+        [
+          {
+            "node": "Prepare Welcome Package",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Assign Equipment by Role",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Welcome Package": {
+      "main": [
+        [
+          {
+            "node": "Send Welcome Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign Equipment by Role": {
+      "main": [
+        [
+          {
+            "node": "Notify IT Team (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Welcome Email": {
+      "main": [
+        [
+          {
+            "node": "Notify Manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify IT Team (Slack)": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Manager": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Return Onboarding Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["enterprise", "hr", "onboarding", "employee", "automation"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-workflow",
+    "usage": "Dùng cho HR khi tạo nhân viên mới. Webhook URL: https://your-n8n.com/webhook/new-employee. Equipment tự động assign theo role."
+  }
+}

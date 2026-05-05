@@ -1,0 +1,403 @@
+{
+  "name": "Quiz Generator Workflow V2",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "event": "fileCreated",
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "mode": "id",
+          "value": ""
+        },
+        "options": {}
+      },
+      "id": "eaf76a79-572b-4bd8-a1ba-4fd43f7e42fa",
+      "name": "Google Drive Trigger",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lọc chỉ lấy các file Markdown (.md)\nconst items = $input.all();\nconst markdownFiles = items.filter(item => {\n  const name = item.json.name || '';\n  const mimeType = item.json.mimeType || '';\n  return name.endsWith('.md') || \n         name.endsWith('.markdown') ||\n         mimeType === 'text/markdown' ||\n         (mimeType === 'text/plain' && (name.endsWith('.md') || name.endsWith('.markdown')));\n});\n\nif (markdownFiles.length === 0) {\n  return [];\n}\n\nconst fileName = markdownFiles[0].json.name;\nconst quizTitle = fileName.replace(/\\.[^/.]+$/, \"\"); // Bỏ đuôi file\nconst questionsPerFile = 15;\nconst description = 'Bộ câu hỏi chuyên sâu được tạo tự động từ tài liệu ' + fileName;\n\nreturn markdownFiles.map(item => ({\n  json: {\n    fileId: item.json.id,\n    fileName: item.json.name,\n    mimeType: item.json.mimeType,\n    quizTitle,\n    questionsPerFile,\n    description\n  }\n}));"
+      },
+      "id": "c154582a-e638-4acf-99c3-5b6d998d8878",
+      "name": "Filter Markdown Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        250,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "=mimeType='application/vnd.google-apps.form' and name='{{ $json.quizTitle }}' and trashed=false"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "search-form-node",
+      "name": "Search Existing Form API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const files = $input.first().json.files || [];\nif (files.length > 0) {\n  console.log('Form đã tồn tại, bỏ qua tạo mới.');\n  return []; // Dừng workflow\n}\n// Nếu chưa có, tiếp tục xử lý file markdown\nreturn [{ json: $('Filter Markdown Files').first().json }];"
+      },
+      "id": "check-form-node",
+      "name": "Check If Form Exists",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.fileId }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "ba292c6f-698e-47e6-a6fe-6fcb73691cf6",
+      "name": "Download Markdown File Content",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1000,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst binaryData = item.binary?.data;\nconst jsonData = item.json;\n\nlet markdownContent = '';\n\nif (binaryData) {\n  const base64Content = binaryData.data;\n  markdownContent = Buffer.from(base64Content, 'base64').toString('utf-8');\n} else if (jsonData.data) {\n  markdownContent = jsonData.data;\n}\n\nconst maxLength = 8000;\nif (markdownContent.length > maxLength) {\n  markdownContent = markdownContent.substring(0, maxLength) + '\\n... [nội dung bị cắt bớt]';\n}\n\nreturn [{\n  json: {\n    ...jsonData,\n    markdownContent,\n    contentLength: markdownContent.length\n  }\n}];"
+      },
+      "id": "0fb1559d-75c3-4d1f-b0a9-cd7bce6b3123",
+      "name": "Extract Text Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\n  const systemPrompt = 'Bạn là chuyên gia thiết kế đề thi và kiểm tra chuyên nghiệp. Nhiệm vụ của bạn là đọc tài liệu Markdown và tạo ra các câu hỏi trắc nghiệm chất lượng cao, có độ khó cao, đánh giá sâu sắc sự hiểu biết của người học.\\n\\nYêu cầu:\\n- MỖI QUIZ PHẢI CÓ ÍT NHẤT 15 CÂU HỎI.\\n- Mỗi câu hỏi phải có 4 lựa chọn (A, B, C, D).\\n- Chỉ có 1 đáp án đúng.\\n- CÂU TRẢ LỜI SAI (distractors) phải cực kỳ hợp lý, có tính gây nhiễu cao, dựa trên những lỗi sai phổ biến hoặc sự nhầm lẫn khái niệm. KHÔNG DÙNG CÁC CÂU TRẢ LỜI SAI QUÁ HIỂN NHIÊN HOẶC QUÁ DỄ.\\n- Các câu hỏi không được chỉ hỏi lý thuyết suông, phải đưa vào bối cảnh thực tế (case study) hoặc best practice để người học phải tư duy phân tích, đánh giá chứ không chỉ ghi nhớ.\\n- Không tạo các câu hỏi quá dễ (mức độ biết/hiểu cơ bản). Tập trung vào mức độ vận dụng, phân tích, đánh giá.\\n- Câu hỏi viết bằng tiếng Việt (nếu tài liệu bằng tiếng Việt) hoặc cùng ngôn ngữ với tài liệu.\\n- TUYỆT ĐỐI KHÔNG sử dụng ký tự xuống dòng (newline) không được escape bên trong chuỗi JSON. Đảm bảo kết quả là JSON hợp lệ hoàn toàn.\\n\\nTRẢ LỜI PHẢI LÀ JSON THUẦN TÚY (không có markdown code block), theo định dạng:\\n{\\n  \"questions\": [\\n    {\\n      \"question\": \"Nội dung câu hỏi tình huống hoặc phân tích?\",\\n      \"options\": {\\n        \"A\": \"Lựa chọn gây nhiễu hợp lý 1\",\\n        \"B\": \"Lựa chọn gây nhiễu hợp lý 2\",\\n        \"C\": \"Lựa chọn đúng (hoặc nhiễu 3)\",\\n        \"D\": \"Lựa chọn còn lại\"\\n      },\\n      \"correctAnswer\": \"C\",\\n      \"explanation\": \"Giải thích chi tiết tại sao đáp án này là tối ưu nhất và tại sao các đáp án kia dù nghe có vẻ đúng nhưng lại sai trong ngữ cảnh này\"\\n    }\\n  ]\\n}';\n  const userPrompt = `Tạo ${$json.questionsPerFile || 15} câu hỏi trắc nghiệm chuyên sâu và thực tế từ tài liệu sau:\\n\\n**Tên file:** ${$json.fileName}\\n\\n**Nội dung:**\\n${$json.markdownContent}`;\n  return {\n    systemInstruction: {\n      parts: [{ text: systemPrompt }]\n    },\n    contents: [{\n      role: 'user',\n      parts: [{ text: userPrompt }]\n    }],\n    safetySettings: [\n      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },\n      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },\n      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },\n      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }\n    ],\n    generationConfig: {\n      temperature: 0.7,\n      maxOutputTokens: 8192,\n      responseMimeType: 'application/json',\n      responseSchema: {\n        type: 'OBJECT',\n        properties: {\n          questions: {\n            type: 'ARRAY',\n            items: {\n              type: 'OBJECT',\n              properties: {\n                question: { type: 'STRING' },\n                options: {\n                  type: 'OBJECT',\n                  properties: {\n                    A: { type: 'STRING' },\n                    B: { type: 'STRING' },\n                    C: { type: 'STRING' },\n                    D: { type: 'STRING' }\n                  },\n                  required: ['A', 'B', 'C', 'D']\n                },\n                correctAnswer: { type: 'STRING', enum: ['A', 'B', 'C', 'D'] },\n                explanation: { type: 'STRING' }\n              },\n              required: ['question', 'options', 'correctAnswer', 'explanation']\n            }\n          }\n        },\n        required: ['questions']\n      }\n    }\n  };\n})() }}",
+        "options": {
+          "response": {
+            "response": {}
+          }
+        }
+      },
+      "id": "a097b0d9-4b55-4238-a86a-1c9fe3c2d562",
+      "name": "AI Generate Quiz Questions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1500,
+        0
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "deiN1WmQ733K0N25",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst candidates = item.json.candidates || [];\nconst aiText = candidates[0]?.content?.parts?.[0]?.text || '';\nconst finishReason = candidates[0]?.finishReason || 'UNKNOWN';\n\nconst fileName = $('Extract Text Content').first().json.fileName;\nconst quizTitle = $('Extract Text Content').first().json.quizTitle;\nconst description = $('Extract Text Content').first().json.description;\n\nif (!aiText) {\n  throw new Error(`Gemini không trả về nội dung cho file ${fileName}. Finish reason: ${finishReason}`);\n}\n\nlet parsedData;\nlet cleanResponse = aiText.replace(/^```json\\s*/m, '').replace(/```\\s*$/m, '').trim();\n\nfunction repairAndParseJSON(str) {\n  try {\n    return JSON.parse(str);\n  } catch (e) {\n    let repairedStr = str;\n    \n    // 1. Find the boundary between completed questions\n    let lastBoundary = repairedStr.lastIndexOf('},{');\n    if (lastBoundary === -1) lastBoundary = repairedStr.lastIndexOf('}, {');\n    if (lastBoundary === -1) lastBoundary = repairedStr.lastIndexOf('},\\n');\n    \n    if (lastBoundary !== -1) {\n      repairedStr = repairedStr.substring(0, lastBoundary + 1);\n      try {\n        return JSON.parse(repairedStr + ']}');\n      } catch (err) {}\n    }\n    \n    // 2. If standard repair fails, use regex to salvage ALL complete questions\n    const questions = [];\n    const regex = /{\"question\"\\s*:\\s*\".+?\"explanation\"\\s*:\\s*\"[^\"]*\"}/gs;\n    let match;\n    while ((match = regex.exec(str)) !== null) {\n      try {\n        questions.push(JSON.parse(match[0]));\n      } catch(err) {}\n    }\n    if (questions.length > 0) return { questions };\n    \n    // Append original error with more context\n    e.message = `${e.message} | Finish reason: ${finishReason}`;\n    throw e;\n  }\n}\n\ntry {\n  parsedData = repairAndParseJSON(cleanResponse);\n} catch (e) {\n  throw new Error(`Không thể parse Gemini response cho file ${fileName}\\nLỗi: ${e.message}\\nNội dung bị lỗi (500 chars): ${cleanResponse.substring(0, 500)}`);\n}\n\nlet questions = [];\nif (Array.isArray(parsedData)) {\n  questions = parsedData;\n} else if (parsedData.questions && Array.isArray(parsedData.questions)) {\n  questions = parsedData.questions;\n} else if (parsedData.quiz && Array.isArray(parsedData.quiz)) {\n  questions = parsedData.quiz; \n} else {\n  for (const key in parsedData) {\n    if (Array.isArray(parsedData[key])) {\n      questions = parsedData[key];\n      break;\n    }\n  }\n}\n\nif (questions.length === 0) {\n  throw new Error(`Gemini trả về JSON nhưng không có câu hỏi nào hoàn chỉnh! Finish reason: ${finishReason}`);\n}\n\nreturn [{\n  json: {\n    fileName,\n    quizTitle,\n    description,\n    questions,\n    totalQuestions: questions.length,\n    totalFiles: 1\n  }\n}];"
+      },
+      "id": "4da48e68-609f-4c85-8137-ac35466a10bd",
+      "name": "Parse AI Quiz Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1750,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://forms.googleapis.com/v1/forms",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\\n  \\\"info\\\": {\\n    \\\"title\\\": \\\"{{ $json.quizTitle }}\\\",\\n    \\\"documentTitle\\\": \\\"{{ $json.quizTitle }}\\\"\\n  }\\n}\\n",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "defeb102-4135-458a-96da-499cdf27a801",
+      "name": "Create Google Form",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2000,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const createResponse = $input.first().json.body || $input.first().json;\nconst quizData = $('Parse AI Quiz Response').first().json;\n\nconst formId = createResponse.formId;\nconst formUrl = createResponse.responderUri;\n\nif (!formId) {\n  throw new Error('Không thể tạo Google Form: ' + JSON.stringify(createResponse));\n}\n\nreturn [{\n  json: {\n    formId,\n    formUrl,\n    editUrl: `https://docs.google.com/forms/d/${formId}/edit`,\n    quizTitle: quizData.quizTitle,\n    questions: quizData.questions,\n    totalQuestions: quizData.totalQuestions,\n    totalFiles: quizData.totalFiles,\n    description: quizData.description\n  }\n}];"
+      },
+      "id": "9c87fb12-b154-4ab8-9928-d18d326c4e2a",
+      "name": "Extract Form ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2250,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://forms.googleapis.com/v1/forms/{{ $json.formId }}:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\n  const formId = $json.formId;\n  const questions = $json.questions;\n  \n  const requests = [];\n  \n  if ($json.description) {\n    requests.push({\n      \"updateFormInfo\": {\n        \"info\": {\n          \"description\": $json.description\n        },\n        \"updateMask\": \"description\"\n      }\n    });\n  }\n  \n  requests.push({\n    \"updateSettings\": {\n      \"settings\": {\n        \"quizSettings\": {\n          \"isQuiz\": true\n        }\n      },\n      \"updateMask\": \"quizSettings.isQuiz\"\n    }\n  });\n  \n  questions.forEach((q, index) => {\n    const options = Object.entries(q.options || {}).map(([key, value]) => ({\n      \"value\": `${key}. ${value}`\n    }));\n    \n    const correctKey = q.correctAnswer;\n    const correctOptionValue = `${correctKey}. ${(q.options || {})[correctKey]}`;\n    \n    requests.push({\n      \"createItem\": {\n        \"item\": {\n          \"title\": q.question,\n          \"description\": q.explanation ? `💡 Giải thích: ${q.explanation}` : '',\n          \"questionItem\": {\n            \"question\": {\n              \"required\": true,\n              \"grading\": {\n                \"pointValue\": 1,\n                \"correctAnswers\": {\n                  \"answers\": [{ \"value\": correctOptionValue }]\n                },\n                \"whenRight\": { \"text\": \"✅ Chính xác!\" },\n                \"whenWrong\": { \"text\": `❌ Đáp án đúng là: ${correctOptionValue}` }\n              },\n              \"choiceQuestion\": {\n                \"type\": \"RADIO\",\n                \"options\": options,\n                \"shuffle\": false\n              }\n            }\n          }\n        },\n        \"location\": { \"index\": index }\n      }\n    });\n  });\n  \n  return { requests };\n})() }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "7aa47221-d920-474a-a4ba-6c6e183a4558",
+      "name": "Add Quiz Questions to Form",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2500,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const formData = $('Extract Form ID').first().json;\nconsole.log(`✅ Đã tạo thành công bộ quiz với ${formData.totalQuestions} câu hỏi`);\nreturn [{ json: { success: true, formId: formData.formId, formTitle: formData.quizTitle, formUrl: formData.formUrl, editUrl: formData.editUrl } }];"
+      },
+      "id": "cf2fac80-5d99-418d-9a48-5bc4a5379cb7",
+      "name": "Build Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2750,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "Filter Markdown Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Markdown Files": {
+      "main": [
+        [
+          {
+            "node": "Search Existing Form API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Existing Form API": {
+      "main": [
+        [
+          {
+            "node": "Check If Form Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Form Exists": {
+      "main": [
+        [
+          {
+            "node": "Download Markdown File Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Markdown File Content": {
+      "main": [
+        [
+          {
+            "node": "Extract Text Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text Content": {
+      "main": [
+        [
+          {
+            "node": "AI Generate Quiz Questions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Generate Quiz Questions": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Quiz Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Quiz Response": {
+      "main": [
+        [
+          {
+            "node": "Create Google Form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Google Form": {
+      "main": [
+        [
+          {
+            "node": "Extract Form ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Form ID": {
+      "main": [
+        [
+          {
+            "node": "Add Quiz Questions to Form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Quiz Questions to Form": {
+      "main": [
+        [
+          {
+            "node": "Build Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "2d715825-9712-448c-bbbf-1d2fb76f8233",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3006a5d6772217f5ebf10e103499012896c18b16962721572449c979edef3060"
+  },
+  "id": "B5uztSfsuBAHUNlq",
+  "tags": []
+}

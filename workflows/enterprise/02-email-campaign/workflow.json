@@ -1,0 +1,350 @@
+{
+  "name": "Enterprise: Email Campaign - Welcome Series",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "welcome-campaign",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook (New User Signup)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "welcome-email-campaign",
+      "notes": "📥 Nhận user signup mới. Body: { name, email, signup_source }. Response: { success: true, campaign_id, email_count }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate and sanitize user signup data\nconst signup = $input.first().json.body || $input.first().json;\n\nif (!signup.name || !signup.email) {\n  throw new Error('Missing required fields: name, email');\n}\n\n// Validate email\nconst emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nif (!emailRegex.test(signup.email)) {\n  throw new Error('Invalid email format');\n}\n\n// Generate campaign ID\nconst campaignId = `WELCOME-${Date.now().toString().slice(-10)}`;\n\nconst sanitized = {\n  campaign_id: campaignId,\n  name: signup.name.trim().replace(/<[^>]*>/g, ''),\n  email: signup.email.toLowerCase().trim(),\n  signup_source: signup.signup_source || 'Website',\n  signup_date: new Date().toISOString(),\n  timezone: 'Asia/Ho_Chi_Minh',\n  emails_sent: [],\n  emails_opened: [],\n  next_email_sequence: 1\n};\n\nconsole.log(`Campaign ${campaignId} started for ${sanitized.name} (${sanitized.email})`);\n\nreturn [{ json: sanitized }];"
+      },
+      "id": "validate-signup",
+      "name": "Validate & Create Campaign ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Validate email, sanitize name, tạo campaign_id unique để tracking toàn bộ sequence."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "🎉 Chào mừng {{ $json.name }} đến với [Tên Công Ty]!",
+        "message": "=Chào {{ $json.name }},\n\n🎉 Chào mừng bạn đã đến với chúng tôi!\n\nChúng tôi rất vui khi bạn tham gia cộng đồng của chúng tôi. Đây là bước đầu tiên trong hành trình của bạn!\n\n━━━━━━━━━━━━━━━━━━━━\n📌 BẮT ĐẦU NHƯ THẾ NÀO?\n━━━━━━━━━━━━━━━━━━━━\n\n1️⃣ Hoàn thiện hồ sơ cá nhân\n   → Đăng nhập và cập nhật thông tin\n\n2️⃣ Khám phá tính năng chính\n   → Xem hướng dẫn nhanh tại đây: [Link]\n\n3️⃣ Kết nối với cộng đồng\n   → Tham gia nhóm của chúng tôi: [Link]\n\n━━━━━━━━━━━━━━━━━━━━\n💡 MẸO NHANH\n━━━━━━━━━━━━━━━━━━━━\n\n• Đừng ngần ngại khám phá và thử nghiệm\n• Nếu cần hỗ trợ, просто reply email này\n• Chúng tôi sẽ gửi thêm hướng dẫn trong 2 ngày tới\n\n━━━━━━━━━━━━━━━━━━━━\n\nChúc bạn có trải nghiệm tuyệt vời!\n\nTrân trọng,\nĐội ngũ [Tên Công Ty]\n📧 support@company.com | 📞 1900-XXXX",
+        "options": {}
+      },
+      "id": "welcome-email",
+      "name": "Email #1: Chào Mừng",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [750, 300],
+      "notes": "⚠️ Gửi email chào mừng ngay khi user signup. Cần Gmail OAuth. Customize [Tên Công Ty] và links."
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "days"
+      },
+      "id": "wait-2-days",
+      "name": "Wait 2 Days",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1000, 300],
+      "notes": "⚠️ Chờ 2 ngày trước khi gửi email tiếp theo. Workflow phải được Active để Wait node hoạt động."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if user opened Email #1\n// NOTE: This is a mock implementation\n// Real implementation needs:\n// 1. Email tracking via SendGrid/Mailchimp open tracking\n// 2. Webhook to capture email opens\n// 3. Store open data in database/Google Sheets\n// For now, we'll simulate with random data\n\nconst campaignData = $input.first().json;\n\n// TODO: Replace with actual email open tracking\n// Example: Query Google Sheets or database for open events\n// const opens = $('Get Email Opens').all().filter(o => o.json.campaign_id === campaignData.campaign_id);\n// const opened = opens.length > 0;\n\n// Mock: Simulate 60% open rate\nconst opened = Math.random() < 0.6;\n\nreturn [{\n  json: {\n    ...campaignData,\n    email_1_sent: true,\n    email_1_opened: opened,\n    next_email: opened ? 3 : 2,\n    check_time: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "check-open",
+      "name": "Check Email #1 Opened?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "notes": "⚠️ MOCK: Kiểm tra user đã mở email #1 chưa. Thực tế cần email tracking (SendGrid/Mailchimp webhook).TODO: Replace with actual tracking."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "opened-check",
+              "leftValue": "={{ $json.email_1_opened }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-opened",
+      "name": "IF: Opened Email #1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1500, 300],
+      "notes": "Nếu đã mở email #1 → gửi Advanced Tips (#3). Nếu chưa → gửi lại Getting Started (#2b)."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "🚀 Hướng dẫn bắt đầu - 5 bước để thành công!",
+        "message": "=Chào {{ $json.name }},\n\nChúng tôi thấy bạn chưa xem email hướng dẫn trước đó. Không sao, chúng tôi gửi lại nhé!\n\n━━━━━━━━━━━━━━━━━━━━\n🚀 5 BƯỚC ĐỂ BẮT ĐẦU\n━━━━━━━━━━━━━━━━━━━━\n\n1️⃣ Đăng nhập vào tài khoản\n   → [Link đăng nhập]\n\n2️⃣ Cập nhật thông tin cá nhân\n   → Thêm ảnh đại diện, thông tin liên hệ\n\n3️⃣ Khám phá dashboard\n   → Xem video hướng dẫn 3 phút: [Link]\n\n4️⃣ Tạo project/workflow đầu tiên\n   → Dùng template có sẵn: [Link]\n\n5️⃣ Kết nối với cộng đồng\n   → Tham gia nhóm Facebook/Zalo: [Link]\n\n━━━━━━━━━━━━━━━━━━━━\n📚 TÀI NGUYÊN HỮU ÍCH\n━━━━━━━━━━━━━━━━━━━━\n\n• Hướng dẫn chi tiết: [Link Docs]\n• Video tutorials: [Link YouTube]\n• FAQ: [Link FAQ]\n\n━━━━━━━━━━━━━━━━━━━━\n\nNếu bạn gặp khó khăn, đừng ngần ngại liên hệ:\n📧 support@company.com | 📞 1900-XXXX\n\nChúc bạn thành công!\n\nTrân trọng,\nĐội ngũ [Tên Công Ty]",
+        "options": {}
+      },
+      "id": "getting-started-resend",
+      "name": "Email #2b: Gửi Lại Hướng Dẫn",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1750, 450],
+      "notes": "⚠️ Gửi lại email hướng dẫn cho user chưa mở email trước. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "💡 Mẹo nâng cao - Tối ưu trải nghiệm của bạn!",
+        "message": "=Chào {{ $json.name }},\n\nTuyệt vời! Bạn đã sẵn sàng cho bước tiếp theo! 🎯\n\n━━━━━━━━━━━━━━━━━━━━\n💡 MẸO NÂNG CAO\n━━━━━━━━━━━━━━━━━━━━\n\n🔧 1. Tùy chỉnh cài đặt\n   → Thiết lập notifications, timezone, language\n   → [Link Settings]\n\n📊 2. Sử dụng Analytics\n   → Theo dõi hiệu suất với dashboard\n   → [Link Analytics]\n\n🔗 3. Tích hợp với công cụ yêu thích\n   → Kết nối Slack, Google Sheets, Zalo\n   → [Link Integrations]\n\n⚡ 4. Automation shortcuts\n   → Tạo rules tự động hóa công việc\n   → [Link Automation]\n\n👥 5. Collaboration features\n   → Mời đồng nghiệp, phân quyền\n   → [Link Team]\n\n━━━━━━━━━━━━━━━━━━━━\n🎓 HỌC THÊM\n━━━━━━━━━━━━━━━━━━━━\n\n• Webinar hàng tuần: Đăng ký tại [Link]\n• Advanced guide: [Link Docs]\n• Case studies: [Link Stories]\n\n━━━━━━━━━━━━━━━━━━━━\n\nNgày mai chúng tôi sẽ gửi cho bạn một ưu đãi đặc biệt!\n\nTrân trọng,\nĐội ngũ [Tên Công Ty]",
+        "options": {}
+      },
+      "id": "advanced-tips",
+      "name": "Email #3: Mẹo Nâng Cao",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1750, 150],
+      "notes": "⚠️ Gửi mẹo nâng cao cho user đã engaged. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "days"
+      },
+      "id": "wait-3-days",
+      "name": "Wait 3 Days",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2000, 300],
+      "notes": "⚠️ Chờ 3 ngày trước khi gửi email ưu đãi. Workflow phải Active."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "🎁 Ưu đãi đặc biệt dành cho {{ $json.name }}!",
+        "message": "=Chào {{ $json.name }},\n\n🎁 Như đã hứa, đây là ưu đãi dành riêng cho bạn!\n\n━━━━━━━━━━━━━━━━━━━━\n🎁 ƯU ĐÃI ĐẶC BIỆT\n━━━━━━━━━━━━━━━━━━━━\n\n🔥 Giảm 20% cho gói Premium\n   → Mã code: WELCOME20\n   → Hạn sử dụng: 7 ngày từ hôm nay\n\n📦 Gói Starter → Premium:\n   ✅ Không giới hạn workflows\n   ✅ Priority support\n   ✅ Advanced analytics\n   ✅ Team collaboration\n\n👉 Đăng ký ngay: [Link Upgrade]\n\n━━━━━━━━━━━━━━━━━━━━\n⏰ ĐỪNG BỎ LỠ\n━━━━━━━━━━━━━━━━━━━━\n\nMã code chỉ có hiệu lực trong 7 ngày!\n\nNếu bạn có câu hỏi về các gói, chúng tôi sẵn sàng tư vấn:\n📧 sales@company.com | 📞 1900-XXXX\n\n━━━━━━━━━━━━━━━━━━━━\n\nCảm ơn bạn đã là một phần của chúng tôi!\n\nTrân trọng,\nĐội ngũ [Tên Công Ty]",
+        "options": {}
+      },
+      "id": "special-offer",
+      "name": "Email #4: Ưu Đãi Đặc Biệt",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2250, 300],
+      "notes": "⚠️ Gửi email ưu đãi cuối cùng trong sequence. Cần Gmail OAuth. Customize discount code và links."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "campaign_id": "={{ $json.campaign_id }}",
+            "name": "={{ $('Validate & Create Campaign ID').first().json.name }}",
+            "email": "={{ $('Validate & Create Campaign ID').first().json.email }}",
+            "signup_source": "={{ $('Validate & Create Campaign ID').first().json.signup_source }}",
+            "email_1_sent": "true",
+            "email_1_opened": "={{ $('Check Email #1 Opened?').first().json.email_1_opened }}",
+            "email_2_sent": "={{ $('IF: Opened Email #1?').first().json.email_1_opened ? 'false' : 'true' }}",
+            "email_3_sent": "={{ $('IF: Opened Email #1?').first().json.email_1_opened ? 'true' : 'false' }}",
+            "email_4_sent": "true",
+            "status": "completed",
+            "completed_at": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-campaign",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [2500, 300],
+      "notes": "⚠️ Log toàn bộ campaign sequence vào Google Sheets. Columns: campaign_id, name, email, signup_source, email_1_sent, email_1_opened, email_2_sent, email_3_sent, email_4_sent, status, completed_at. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Welcome campaign started\",\n  \"campaign_id\": \"{{ $('Validate & Create Campaign ID').first().json.campaign_id }}\",\n  \"email\": \"{{ $('Validate & Create Campaign ID').first().json.email }}\",\n  \"total_emails_in_sequence\": 4,\n  \"next_email\": \"Email #2 will be sent in 2 days\"\n}",
+        "options": {}
+      },
+      "id": "response-node",
+      "name": "Return Campaign Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2750, 300],
+      "notes": "Trả về response cho webhook caller với campaign_id và status."
+    }
+  ],
+  "connections": {
+    "Webhook (New User Signup)": {
+      "main": [
+        [
+          {
+            "node": "Validate & Create Campaign ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Create Campaign ID": {
+      "main": [
+        [
+          {
+            "node": "Email #1: Chào Mừng",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email #1: Chào Mừng": {
+      "main": [
+        [
+          {
+            "node": "Wait 2 Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 2 Days": {
+      "main": [
+        [
+          {
+            "node": "Check Email #1 Opened?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Email #1 Opened?": {
+      "main": [
+        [
+          {
+            "node": "IF: Opened Email #1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Opened Email #1?": {
+      "main": [
+        [
+          {
+            "node": "Email #3: Mẹo Nâng Cao",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email #2b: Gửi Lại Hướng Dẫn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email #3: Mẹo Nâng Cao": {
+      "main": [
+        [
+          {
+            "node": "Wait 3 Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email #2b: Gửi Lại Hướng Dẫn": {
+      "main": [
+        [
+          {
+            "node": "Wait 3 Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 3 Days": {
+      "main": [
+        [
+          {
+            "node": "Email #4: Ưu Đãi Đặc Biệt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email #4: Ưu Đãi Đặc Biệt": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Return Campaign Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["enterprise", "email-campaign", "welcome-series", "automation", "marketing"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-workflow",
+    "usage": "Dùng cho welcome series khi user mới signup. Webhook URL: https://your-n8n.com/webhook/welcome-campaign. Sequence: Email 1 (immediate) → Wait 2 days → Email 2/3 → Wait 3 days → Email 4."
+  }
+}

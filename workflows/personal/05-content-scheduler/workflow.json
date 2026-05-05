@@ -1,0 +1,310 @@
+{
+  "name": "Personal: Content Scheduler",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "everyHour",
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (Hourly Check)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "notes": "⚙️ Cấu hình: Check mỗi giờ để xem có content cần đăng. Có thể đổi thành 'everyDay' để check 1 lần/ngày."
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "read-calendar",
+      "name": "Read Content Calendar",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [500, 300],
+      "notes": "⚠️ Đọc content calendar từ Google Sheets. Columns: date, time, platform, content, hashtags, image_url, status, post_url. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter posts due to publish now\nconst now = new Date();\nconst currentTime = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });\nconst currentDate = now.toISOString().split('T')[0];\n\nconst allPosts = $input.all().map(item => item.json);\n\nconst toPublish = allPosts.filter(post => {\n  if (post.status !== 'scheduled' && post.status !== 'ready') return false;\n  if (post.date !== currentDate) return false;\n  \n  const postTime = post.time || '00:00';\n  const [postHour, postMinute] = postTime.split(':').map(Number);\n  const [currentHour, currentMinute] = currentTime.split(':').map(Number);\n  \n  const diffMinutes = (currentHour - postHour) * 60 + (currentMinute - postMinute);\n  return diffMinutes >= 0 && diffMinutes < 60; // Within the hour\n});\n\nconsole.log(`Found ${toPublish.length} posts to publish`);\n\nreturn toPublish.map(post => ({\n  json: {\n    ...post,\n    platforms: post.platform?.split(',').map(p => p.trim().toLowerCase()) || ['twitter'],\n    timestamp: now.toISOString(),\n    timezone: 'Asia/Ho_Chi_Minh'\n  }\n}));"
+      },
+      "id": "filter-due-posts",
+      "name": "Filter Posts Due Now",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Lọc posts cần đăng trong giờ hiện tại. Status phải là 'scheduled' hoặc 'ready'. Date format: YYYY-MM-DD, Time format: HH:MM"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-posts",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "larger"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-posts",
+      "name": "IF: Has Posts to Publish?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "notes": "Nếu có posts cần đăng → tiếp tục. Nếu không → dừng."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format content for Twitter\nconst post = $input.first().json;\n\nconst content = post.content || '';\nconst hashtags = post.hashtags ? `\\n\\n${post.hashtags}` : '';\nconst link = post.link ? `\\n\\n${post.link}` : '';\n\n// Twitter: max 280 chars\nlet tweet = content + hashtags + link;\nif (tweet.length > 280) {\n  tweet = content.substring(0, 250) + '...' + hashtags + link;\n  if (tweet.length > 280) {\n    tweet = tweet.substring(0, 277) + '...';\n  }\n}\n\nreturn [{\n  json: {\n    ...post,\n    platform: 'twitter',\n    formatted_content: tweet,\n    platform_config: {\n      max_length: 280,\n      supports_images: true,\n      supports_links: true\n    }\n  }\n}];"
+      },
+      "id": "format-twitter",
+      "name": "Format for Twitter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 150],
+      "notes": "Format content cho Twitter: max 280 chars, thêm hashtags và link."
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.formatted_content }}",
+        "additionalFields": {}
+      },
+      "id": "post-twitter",
+      "name": "Post to Twitter",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 1,
+      "position": [1500, 150],
+      "notes": "⚠️ Đăng lên Twitter/X. Cần Twitter OAuth2 credential. Twitter API v2 required."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format content for LinkedIn\nconst post = $input.first().json;\n\nconst content = post.content || '';\nconst hashtags = post.hashtags ? `\\n\\n${post.hashtags}` : '';\nconst link = post.link ? `\\n\\nĐọc thêm: ${post.link}` : '';\n\n// LinkedIn: supports longer content\nconst linkedinPost = content + hashtags + link;\n\nreturn [{\n  json: {\n    ...post,\n    platform: 'linkedin',\n    formatted_content: linkedinPost,\n    platform_config: {\n      max_length: 3000,\n      supports_images: true,\n      supports_links: true\n    }\n  }\n}];"
+      },
+      "id": "format-linkedin",
+      "name": "Format for LinkedIn",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "notes": "Format content cho LinkedIn: professional tone, longer format (max 3000 chars)."
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.formatted_content }}",
+        "additionalFields": {}
+      },
+      "id": "post-linkedin",
+      "name": "Post to LinkedIn",
+      "type": "n8n-nodes-base.linkedin",
+      "typeVersion": 1,
+      "position": [1500, 300],
+      "notes": "⚠️ Đăng lên LinkedIn. Cần LinkedIn OAuth2 credential."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format content for Facebook\nconst post = $input.first().json;\n\nconst content = post.content || '';\nconst hashtags = post.hashtags ? ` ${post.hashtags}` : '';\nconst link = post.link ? `\\n\\n${post.link}` : '';\n\nconst fbPost = content + hashtags + link;\n\nreturn [{\n  json: {\n    ...post,\n    platform: 'facebook',\n    formatted_content: fbPost,\n    platform_config: {\n      max_length: 63206,\n      supports_images: true,\n      supports_links: true\n    }\n  }\n}];"
+      },
+      "id": "format-facebook",
+      "name": "Format for Facebook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 450],
+      "notes": "Format content cho Facebook: supports long content, images, links."
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.formatted_content }}",
+        "additionalFields": {}
+      },
+      "id": "post-facebook",
+      "name": "Post to Facebook",
+      "type": "n8n-nodes-base.facebook",
+      "typeVersion": 1,
+      "position": [1500, 450],
+      "notes": "⚠️ Đăng lên Facebook Page. Cần Facebook OAuth2 credential."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "status": "posted",
+            "posted_at": "={{ $json.timestamp }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "update-status",
+      "name": "Update Status to Posted",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1750, 300],
+      "notes": "⚠️ Update status trong Sheets từ 'scheduled' → 'posted'. Cần Sheet ID."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Hourly Check)": {
+      "main": [
+        [
+          {
+            "node": "Read Content Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Content Calendar": {
+      "main": [
+        [
+          {
+            "node": "Filter Posts Due Now",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Posts Due Now": {
+      "main": [
+        [
+          {
+            "node": "IF: Has Posts to Publish?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Has Posts to Publish?": {
+      "main": [
+        [
+          {
+            "node": "Format for Twitter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format for Twitter": {
+      "main": [
+        [
+          {
+            "node": "Post to Twitter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Twitter": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format for LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Post to LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format for Facebook": {
+      "main": [
+        [
+          {
+            "node": "Post to Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Facebook": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["personal", "social-media", "content", "scheduler", "automation"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "personal-workflow"
+  }
+}

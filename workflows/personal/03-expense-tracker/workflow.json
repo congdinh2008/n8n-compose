@@ -1,0 +1,249 @@
+{
+  "name": "Personal: Expense Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger (Bank Email)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [250, 300],
+      "notes": "⚙️ Cấu hình: Poll Gmail để lấy email thông báo giao dịch từ ngân hàng. Có thể filter by label hoặc sender (vd: 'noreply@vietcombank.com.vn')"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse transaction data from bank email\nconst email = $input.first().json;\nconst body = email.body || '';\nconst subject = (email.subject || '').toLowerCase();\nconst from = email.fromAddress || '';\n\n// Extract transaction info using regex patterns for Vietnamese banks\nlet amount = null;\nlet merchant = '';\nlet date = new Date().toISOString();\nlet transactionType = 'unknown';\nlet bank = '';\n\n// Identify bank\nif (from.includes('vietcombank') || subject.includes('vietcombank')) {\n  bank = 'Vietcombank';\n  // VCB format: \"GD thanh toan so the ... So tien: 1.234.567 VND tai CT...\"\n  const amountMatch = body.match(/[Ss]ố [Tt]ien[:\\s]*([\\d\\.\\,]+)\\s*(?:VN[Dd]|vnd)?/);\n  const merchantMatch = body.match(/[Tt]ai\\s+([A-Za-z0-9\\s\\.]+)/);\n  const dateMatch = body.match(/(\\d{2}\\/\\d{2}\\/\\d{4}\\s+\\d{2}:\\d{2})/);\n  \n  amount = amountMatch ? parseFloat(amountMatch[1].replace(/[\\.,]/g, '')) : null;\n  merchant = merchantMatch ? merchantMatch[1].trim() : 'Unknown';\n  date = dateMatch ? new Date(dateMatch[1]).toISOString() : date;\n  \n} else if (from.includes('techcombank') || subject.includes('techcombank')) {\n  bank = 'Techcombank';\n  // TCB format\n  const amountMatch = body.match(/([\\d\\.\\,]+)\\s*(?:VN[Dd]|vnd).*?(?:thanh toán|giao dịch)/i);\n  const merchantMatch = body.match/(?:tại|ở|ở|for)\\s+([A-Za-z0-9\\s\\.]+)/i);\n  \n  amount = amountMatch ? parseFloat(amountMatch[1].replace(/[\\.,]/g, '')) : null;\n  merchant = merchantMatch ? merchantMatch[1].trim() : 'Unknown';\n  \n} else if (from.includes('vpbank') || subject.includes('vpbank')) {\n  bank = 'VPBank';\n  const amountMatch = body.match/([\\d\\.\\,]+)\\s*(?:VN[Dd]|vnd)/);\n  const merchantMatch = body.match/(?:tại|ở)\\s+([A-Za-z0-9\\s\\.]+)/);\n  \n  amount = amountMatch ? parseFloat(amountMatch[1].replace(/[\\.,]/g, '')) : null;\n  merchant = merchantMatch ? merchantMatch[1].trim() : 'Unknown';\n} else {\n  // Generic bank email\n  bank = 'Unknown';\n  const amountMatch = body.match/([\\d\\.\\,]+(?:\\.\\d{2})?)\\s*(?:VN[Dd]|vnd|đ)/);\n  amount = amountMatch ? parseFloat(amountMatch[1].replace(/[\\.,]/g, '')) : null;\n  merchant = 'Unknown';\n}\n\n// Determine transaction type\nif (subject.includes('credit') || subject.includes('nhận') || subject.includes('incoming')) {\n  transactionType = 'income';\n} else if (subject.includes('debit') || subject.includes('thanh toán') || subject.includes('payment')) {\n  transactionType = 'expense';\n}\n\nreturn [{\n  json: {\n    amount,\n    merchant,\n    date,\n    transactionType,\n    bank,\n    original_subject: email.subject,\n    from,\n    timestamp: new Date().toISOString(),\n    timezone: 'Asia/Ho_Chi_Minh'\n  }\n}];"
+      },
+      "id": "parse-transaction",
+      "name": "Parse Transaction Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "🔍 Parse email body để lấy số tiền, merchant, ngày. Regex patterns cho Vietcombank, Techcombank, VPBank. Customize theo định dạng email ngân hàng của bạn."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Categorize expense based on merchant name\nconst transaction = $input.first().json;\nconst merchant = (transaction.merchant || '').toLowerCase();\n\n// Vietnamese merchant mapping\nconst categories = {\n  // Coffee/Tea\n  coffee: ['starbucks', 'highlands', 'trung nguyen', 'phuc long', 'cong caphe', 'the coffee house'],\n  // Shopping\n  shopping: ['shopee', 'lazada', 'tiki', 'amazon', 'being', 'dien may xanh'],\n  // Transport\n  transport: ['grab', 'be', 'gojek', 'uber', 'taxi', 'vinfast'],\n  // Food\n  food: ['now', 'shopeefood', 'foody', 'grabfood', 'deliveroo'],\n  // Bills\n  bills: ['evn', 'vnpt', 'viettel', 'fpt', 'water', 'electricity'],\n  // Entertainment\n  entertainment: ['netflix', 'spotify', 'youtube', 'cinema', 'lotte']\n};\n\nlet category = 'other';\n\nfor (const [cat, merchants] of Object.entries(categories)) {\n  if (merchants.some(m => merchant.includes(m))) {\n    category = cat;\n    break;\n  }\n}\n\n// Monthly budget configuration (VND)\nconst BUDGETS = {\n  coffee: 1000000,        // 1 triệu/tháng\n  shopping: 5000000,      // 5 triệu/tháng\n  transport: 2000000,     // 2 triệu/tháng\n  food: 3000000,          // 3 triệu/tháng\n  bills: 2000000,         // 2 triệu/tháng\n  entertainment: 1000000, // 1 triệu/tháng\n  other: 5000000          // 5 triệu/tháng\n};\n\nreturn [{\n  json: {\n    ...transaction,\n    category,\n    budget_limit: BUDGETS[category] || 5000000,\n    amount_formatted: transaction.amount ? `${transaction.amount.toLocaleString('vi-VN')}đ` : 'N/A'\n  }\n}];"
+      },
+      "id": "categorize-expense",
+      "name": "Categorize Expense",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "📂 Phân loại chi tiêu dựa trên merchant name. Customize categories và BUDGETS theo nhu cầu. Ngân sách tính theo VND/tháng."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "date": "={{ $json.date }}",
+            "merchant": "={{ $json.merchant }}",
+            "amount": "={{ $json.amount }}",
+            "category": "={{ $json.category }}",
+            "bank": "={{ $json.bank }}",
+            "transaction_type": "={{ $json.transactionType }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-to-sheets",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1000, 300],
+      "notes": "⚠️ Lưu transaction vào Google Sheets. Columns: date, merchant, amount, category, bank, transaction_type. Cần Sheet ID và OAuth credential."
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "column": "category",
+              "condition": "equal",
+              "value": "={{ $json.category }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-monthly-total",
+      "name": "Get Monthly Total for Category",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1250, 300],
+      "notes": "⚠️ Đọc tổng chi tiêu tháng này cho category. Cần Sheet ID giống node trên."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if budget exceeded\nconst currentExpense = $('Categorize Expense').first().json.amount || 0;\nconst budgetLimit = $('Categorize Expense').first().json.budget_limit || 5000000;\n\nconst monthlyExpenses = $input.all().map(item => parseFloat(item.json.amount) || 0);\nconst monthlyTotal = monthlyExpenses.reduce((sum, val) => sum + val, 0) + currentExpense;\n\nconst budgetUsed = (monthlyTotal / budgetLimit) * 100;\nconst exceeded = monthlyTotal > budgetLimit;\n\nconsole.log(`Category: ${$('Categorize Expense').first().json.category}`);\nconsole.log(`Monthly total: ${monthlyTotal.toLocaleString('vi-VN')}đ`);\nconsole.log(`Budget limit: ${budgetLimit.toLocaleString('vi-VN')}đ`);\nconsole.log(`Budget used: ${budgetUsed.toFixed(1)}%`);\n\nreturn [{\n  json: {\n    category: $('Categorize Expense').first().json.category,\n    current_expense: currentExpense,\n    monthly_total: monthlyTotal,\n    monthly_total_formatted: monthlyTotal.toLocaleString('vi-VN'),\n    budget_limit: budgetLimit,\n    budget_limit_formatted: budgetLimit.toLocaleString('vi-VN'),\n    budget_used_percent: budgetUsed.toFixed(1),\n    exceeded,\n    merchant: $('Categorize Expense').first().json.merchant,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "check-budget",
+      "name": "Check Budget Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 300],
+      "notes": "Tính tổng chi tiêu tháng và kiểm tra có vượt ngân sách không."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "budget-check",
+              "leftValue": "={{ $json.exceeded }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-exceeded",
+      "name": "IF: Budget Exceeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1750, 300],
+      "notes": "Nếu vượt ngân sách → gửi alert. Nếu không → chỉ log."
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "⚠️ *Budget Alert!*\n\n*Category:* {{ $json.category }}\n*Chi tiêu tháng:* {{ $json.monthly_total_formatted }}đ\n*Ngân sách:* {{ $json.budget_limit_formatted }}đ\n*Đã dùng:* {{ $json.budget_used_percent }}%\n\n🛑 Bạn đã vượt ngân sách! Hãy xem xét chi tiêu.",
+        "additionalFields": {}
+      },
+      "id": "send-alert",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [2000, 150],
+      "notes": "⚠️ Gửi alert qua Telegram khi vượt ngân sách. Cần bot token và chat_id."
+    }
+  ],
+  "connections": {
+    "Gmail Trigger (Bank Email)": {
+      "main": [
+        [
+          {
+            "node": "Parse Transaction Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Transaction Data": {
+      "main": [
+        [
+          {
+            "node": "Categorize Expense",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Categorize Expense": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Get Monthly Total for Category",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Monthly Total for Category": {
+      "main": [
+        [
+          {
+            "node": "Check Budget Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Budget Status": {
+      "main": [
+        [
+          {
+            "node": "IF: Budget Exceeded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Budget Exceeded?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["personal", "finance", "expense", "budget", "tracking"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "personal-workflow"
+  }
+}

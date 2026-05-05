@@ -1,0 +1,355 @@
+{
+  "name": "Enterprise: Customer Support Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "messageReceived",
+        "simple": false,
+        "filters": {
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "id": "support-email-trigger",
+      "name": "Gmail Trigger (Support Email)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [250, 300],
+      "notes": "⚠️ Trigger khi có email support mới (unread). Cần Gmail OAuth2 credential. Cấu hình filter cho support email address."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and classify support request\nconst email = $input.first().json;\nconst subject = (email.subject || '').toLowerCase();\nconst body = (email.textPlain || email.body || '').toLowerCase();\nconst fullText = `${subject} ${body}`;\nconst from = email.from || '';\n\n// Extract sender info\nconst emailMatch = from.match(/<?([^\\s<>,]+@[^\\s<>,]+)>?/);\nconst senderEmail = emailMatch ? emailMatch[1] : '';\nconst nameMatch = from.match(/([A-ZÀ-Ỹ][a-zà-ỹ]+(?:\\s[A-ZÀ-Ỹ][a-zà-ỹ]+)+)/);\nconst senderName = nameMatch ? nameMatch[1] : senderEmail.split('@')[0];\n\n// Classification keywords (Vietnamese + English)\nconst categories = {\n  refund: {\n    keywords: ['hoàn tiền', 'refund', 'trả lại', 'return money', 'hoàn trả', 'xin tiền lại', 'không nhận được hàng'],\n    priority: 'high',\n    sla_hours: 4\n  },\n  product_question: {\n    keywords: ['hỏi', 'question', 'tư vấn', 'thông tin', 'info', 'giới thiệu', 'tính năng', 'feature', 'giá', 'price', 'chi phí'],\n    priority: 'medium',\n    sla_hours: 8\n  },\n  technical_issue: {\n    keywords: ['lỗi', 'error', 'bug', 'không hoạt động', 'bị hỏng', 'không dùng được', 'crash', 'freeze', 'chậm', 'slow', 'không đăng nhập', 'login'],\n    priority: 'urgent',\n    sla_hours: 2\n  },\n  complaint: {\n    keywords: ['khiếu nại', 'complaint', 'phàn nàn', 'tệ', 'bad', 'terrible', 'worst', 'thất vọng', 'disappointed', 'dịch vụ kém'],\n    priority: 'urgent',\n    sla_hours: 2\n  }\n};\n\nlet requestType = 'general';\nlet priority = 'low';\nlet slaHours = 24;\n\nfor (const [type, config] of Object.entries(categories)) {\n  const keywordCount = config.keywords.filter(kw => fullText.includes(kw)).length;\n  if (keywordCount > 0) {\n    requestType = type;\n    priority = config.priority;\n    slaHours = config.sla_hours;\n    break;\n  }\n}\n\n// Generate ticket ID\nconst ticketId = `TKT-${Date.now().toString().slice(-8)}`;\nconst now = new Date();\nconst slaDeadline = new Date(now.getTime() + slaHours * 60 * 60 * 1000);\n\n// Extract amount for refund requests\nlet refundAmount = null;\nif (requestType === 'refund') {\n  const amountMatch = fullText.match(/([\\d\\.,]+)\\s*(?:[Vv][Nn][Dd]|[₫đ])/);\n  if (amountMatch) {\n    refundAmount = parseFloat(amountMatch[1].replace(/[\\.,]/g, ''));\n  }\n}\n\nreturn [{\n  json: {\n    ticket_id: ticketId,\n    sender_name: senderName,\n    sender_email: senderEmail,\n    subject: email.subject,\n    body: email.textPlain || email.body,\n    request_type: requestType,\n    request_type_vn: {\n      refund: 'Yêu cầu hoàn tiền',\n      product_question: 'Hỏi về sản phẩm',\n      technical_issue: 'Lỗi kỹ thuật',\n      complaint: 'Khiếu nại',\n      general: 'Yêu cầu chung'\n    }[requestType],\n    priority,\n    priority_vn: {\n      urgent: 'Khẩn',\n      high: 'Cao',\n      medium: 'Trung bình',\n      low: 'Thấp'\n    }[priority],\n    sla_hours: slaHours,\n    sla_deadline: slaDeadline.toISOString(),\n    created_at: now.toISOString(),\n    timezone: 'Asia/Ho_Chi_Minh',\n    refund_amount: refundAmount,\n    refund_amount_formatted: refundAmount ? `${refundAmount.toLocaleString('vi-VN')}đ` : null,\n    auto_approve_refund: refundAmount ? refundAmount < 500000 : false,\n    status: 'new'\n  }\n}];"
+      },
+      "id": "classify-request",
+      "name": "Parse & Classify Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Phân loại yêu cầu: Refund, Product Question, Technical Issue, Complaint, General. Tạo ticket ID. Tính SLA deadline. Refund < 500,000đ được auto-approve."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "type-check",
+              "leftValue": "={{ $json.request_type }}",
+              "rightValue": "refund",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "switch-request-type",
+      "name": "Switch: Request Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [750, 300],
+      "notes": "Routing dựa trên loại yêu cầu. Mỗi loại xử lý khác nhau.",
+      "rules": {
+        "outputs": 5,
+        "rules": [
+          { "conditions": { "string": { "value1": "={{ $json.request_type }}", "operation": "equal", "value2": "refund" } } },
+          { "conditions": { "string": { "value1": "={{ $json.request_type }}", "operation": "equal", "value2": "product_question" } } },
+          { "conditions": { "string": { "value1": "={{ $json.request_type }}", "operation": "equal", "value2": "technical_issue" } } },
+          { "conditions": { "string": { "value1": "={{ $json.request_type }}", "operation": "equal", "value2": "complaint" } } }
+        ]
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "refund-amount-check",
+              "leftValue": "={{ $json.auto_approve_refund }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-auto-approve",
+      "name": "IF: Auto-Approve Refund? (< 500K VND)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 100],
+      "notes": "Nếu refund < 500,000đ → Auto-approve. Nếu >= 500,000đ → Cần manager approval."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.sender_email }}",
+        "subject": "✅ Yêu cầu hoàn tiền #{{ $json.ticket_id }} đã được duyệt",
+        "message": "=Kính gửi {{ $json.sender_name }},\n\n✅ Yêu cầu hoàn tiền của bạn đã được phê duyệt!\n\nMã ticket: #{{ $json.ticket_id }}\nSố tiền hoàn: {{ $json.refund_amount_formatted }}\nThời gian xử lý: 3-5 ngày làm việc\n\nTiền sẽ được hoàn vào tài khoản gốc.\n\nTrân trọng,\nĐội ngũ CSKH",
+        "options": {}
+      },
+      "id": "approve-refund",
+      "name": "Auto-Approve Refund & Notify",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 50],
+      "notes": "⚠️ Tự động duyệt refund < 500K và gửi email xác nhận. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "channel": "#support-escalations",
+        "text": "⚠️ *Refund cần phê duyệt!*\n\n*Ticket:* #{{ $json.ticket_id }}\n*Khách:* {{ $json.sender_name }}\n*Số tiền:* {{ $json.refund_amount_formatted }}\n*SLA:* {{ $json.sla_hours }} giờ\n\n<Link to ticket|Xem chi tiết>",
+        "otherOptions": {}
+      },
+      "id": "escalate-refund",
+      "name": "Escalate Refund to Manager (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1250, 200],
+      "notes": "⚠️ Gửi Slack alert cho manager khi refund >= 500K. Cần Slack OAuth."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.sender_email }}",
+        "subject": "📋 Trả lời: {{ $json.subject }}",
+        "message": "=Kính gửi {{ $json.sender_name }},\n\nCảm ơn bạn đã liên hệ với chúng tôi!\n\n📌 Mã ticket: #{{ $json.ticket_id }}\n📌 Loại yêu cầu: {{ $json.request_type_vn }}\n📌 Độ ưu tiên: {{ $json.priority_vn }}\n📌 Thời gian phản hồi: {{ $json.sla_hours }} giờ\n\nĐây là một số thông tin có thể hữu ích:\n\n📖 FAQ: [link]\n📚 Tài liệu hướng dẫn: [link]\n💬 Chat support: [link]\n\nChúng tôi sẽ phản hồi chi tiết trong thời gian sớm nhất!\n\nTrân trọng,\nĐội ngũ CSKH",
+        "options": {}
+      },
+      "id": "send-faq-response",
+      "name": "Send FAQ Response",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 350],
+      "notes": "⚠️ Gửi FAQ auto-reply cho product questions. Cần Gmail OAuth. Customize links theo tài liệu thực tế."
+    },
+    {
+      "parameters": {
+        "channel": "#tech-support",
+        "text": "🔧 *Lỗi kỹ thuật mới!*\n\n*Ticket:* #{{ $json.ticket_id }}\n*Khách:* {{ $json.sender_name }} ({{ $json.sender_email }})\n*SLA:* {{ $json.sla_hours }} giờ\n\n*Subject:* {{ $json.subject }}\n\n<Link to ticket|Xem chi tiết và xử lý>",
+        "otherOptions": {}
+      },
+      "id": "notify-tech-team",
+      "name": "Notify Tech Team (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1250, 500],
+      "notes": "⚠️ Gửi Slack alert cho tech team. Cần Slack OAuth channel #tech-support."
+    },
+    {
+      "parameters": {
+        "channel": "#support-escalations",
+        "text": "🚨 *Khiếu nại khẩn!*\n\n*Ticket:* #{{ $json.ticket_id }}\n*Khách:* {{ $json.sender_name }}\n*SLA:* {{ $json.sla_hours }} giờ\n\n*Subject:* {{ $json.subject }}\n\nCần xử lý GẤP để tránh escalation!",
+        "otherOptions": {}
+      },
+      "id": "notify-manager",
+      "name": "Notify Manager (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1250, 650],
+      "notes": "⚠️ Gửi Slack alert cho manager khi có khiếu nại. Cần Slack OAuth channel #support-escalations."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "ticket_id": "={{ $json.ticket_id }}",
+            "sender_name": "={{ $json.sender_name }}",
+            "sender_email": "={{ $json.sender_email }}",
+            "request_type": "={{ $json.request_type_vn }}",
+            "priority": "={{ $json.priority_vn }}",
+            "sla_deadline": "={{ $json.sla_deadline }}",
+            "status": "new",
+            "created_at": "={{ $json.created_at }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-ticket",
+      "name": "Log Ticket to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1500, 300],
+      "notes": "⚠️ Lưu ticket vào Google Sheets để theo dõi. Columns: ticket_id, sender_name, sender_email, request_type, priority, sla_deadline, status, created_at. Cần Sheet ID."
+    }
+  ],
+  "connections": {
+    "Gmail Trigger (Support Email)": {
+      "main": [
+        [
+          {
+            "node": "Parse & Classify Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Classify Request": {
+      "main": [
+        [
+          {
+            "node": "Switch: Request Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: Request Type": {
+      "main": [
+        [
+          {
+            "node": "IF: Auto-Approve Refund? (< 500K VND)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send FAQ Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Tech Team (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Manager (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send FAQ Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Auto-Approve Refund? (< 500K VND)": {
+      "main": [
+        [
+          {
+            "node": "Auto-Approve Refund & Notify",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate Refund to Manager (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Approve Refund & Notify": {
+      "main": [
+        [
+          {
+            "node": "Log Ticket to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalate Refund to Manager (Slack)": {
+      "main": [
+        [
+          {
+            "node": "Log Ticket to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send FAQ Response": {
+      "main": [
+        [
+          {
+            "node": "Log Ticket to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Tech Team (Slack)": {
+      "main": [
+        [
+          {
+            "node": "Log Ticket to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Manager (Slack)": {
+      "main": [
+        [
+          {
+            "node": "Log Ticket to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["enterprise", "customer-support", "ticketing", "sla", "automation", "vietnamese"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-workflow",
+    "sla_rules": "Refund/Complaint: 2h, Technical: 2h, Product Question: 8h, General: 24h",
+    "usage": "Auto-classify support emails, create tickets, route based on type, track SLA deadlines."
+  }
+}

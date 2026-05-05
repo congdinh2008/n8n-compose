@@ -1,0 +1,126 @@
+{
+  "name": "Personal: Daily Task Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "everyHour",
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (8 AM Daily)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "notes": "⚙️ Cấu hình: Chạy hàng ngày lúc 8:00 AM. Đổi 'everyHour' thành 'everyDay' và set triggerAtHour = 8"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Daily Task Digest - Morning Briefing\n// Tổng hợp tasks, events, và priorities trong ngày\n\nconst now = new Date();\nconst today = now.toISOString().split('T')[0];\nconst vietnamTime = now.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' });\n\n// Mock data - Thay thế bằng data từ các nodes thực tế\nconst tasks = {\n  urgent: [],\n  today: [],\n  overdue: [],\n  upcoming: []\n};\n\nconst calendarEvents = [];\nconst focusItems = [];\n\nreturn [{\n  json: {\n    date: today,\n    vietnam_time: vietnamTime,\n    tasks,\n    calendar: calendarEvents,\n    focus: focusItems,\n    summary: {\n      total_tasks: 0,\n      urgent_count: 0,\n      overdue_count: 0,\n      meetings_today: 0\n    }\n  }\n}];"
+      },
+      "id": "fetch-tasks",
+      "name": "Fetch & Merge Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "📝 TODO: Kết nối với Todoist/Notion/Google Tasks. Hiện tại dùng mock data."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate Morning Briefing email/message\nconst briefing = $input.first().json;\n\nconst taskList = briefing.tasks.urgent.length > 0\n  ? briefing.tasks.urgent.map((t, i) => `${i + 1}. ⚠️ ${t.title || t}`).join('\\n')\n  : briefing.tasks.today.map((t, i) => `${i + 1}. ${t.title || t}`).join('\\n') || '✅ Không có tasks nào hôm nay!';\n\nconst meetingList = briefing.calendar.length > 0\n  ? briefing.calendar.map(e => `• ${e.time || 'TBD'}: ${e.title || e}`).join('\\n')\n  : '📅 Không có meetings hôm nay!';\n\nconst message = {\n  to: '', // Điền email của bạn\n  subject: `📋 Morning Briefing - ${briefing.date}`,\n  body: `Chào buổi sáng! ☀️\n\nĐây là tóm tắt công việc hôm nay:\n\n━━━━━━━━━━━━━━━━━━━━\n📊 TỔNG QUAN\n━━━━━━━━━━━━━━━━━━━━\n\nTasks khẩn cấp: ${briefing.summary.urgent_count}\nTasks hôm nay: ${briefing.summary.total_tasks}\nTasks quá hạn: ${briefing.summary.overdue_count}\nMeetings: ${briefing.summary.meetings_today}\n\n━━━━━━━━━━━━━━━━━━━━\n✅ TASKS CẦN LÀM\n━━━━━━━━━━━━━━━━━━━━\n\n${taskList}\n\n━━━━━━━━━━━━━━━━━━━━\n📅 MEETINGS HÔM NAY\n━━━━━━━━━━━━━━━━━━━━\n\n${meetingList}\n\n━━━━━━━━━━━━━━━━━━━━\n🎯 FOCUS ITEMS\n━━━━━━━━━━━━━━━━━━━━\n\n${briefing.focus.length > 0 ? briefing.focus.map(f => `• ${f}`).join('\\n') : 'Không có focus items'}\n\n━━━━━━━━━━━━━━━━━━━━\n\n💡 Lời khuyên: Hãy bắt đầu với task khẩn cấp nhất trước!\n\nChúc một ngày làm việc hiệu quả! 🚀`,\n  briefing_data: briefing\n};\n\nreturn [{ json: message }];"
+      },
+      "id": "format-briefing",
+      "name": "Format Morning Briefing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Tạo email briefing tiếng Việt với formatting đẹp. Điền 'to' = email của bạn."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 150],
+      "notes": "⚠️ Cần Gmail OAuth2 credential. Thay thế bằng Email node khác nếu dùng provider khác."
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ $json.subject }}\n\n{{ $json.body }}",
+        "additionalFields": {}
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram Message (Optional)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1000, 450],
+      "notes": "⚠️ Optional: Gửi qua Telegram bot. Cần bot token và chat_id. Có thể bỏ node này nếu không dùng."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (8 AM Daily)": {
+      "main": [
+        [
+          {
+            "node": "Fetch & Merge Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch & Merge Tasks": {
+      "main": [
+        [
+          {
+            "node": "Format Morning Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Morning Briefing": {
+      "main": [
+        [
+          {
+            "node": "Send Email (Gmail)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Telegram Message (Optional)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["personal", "productivity", "daily", "email", "tasks"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "personal-workflow"
+  }
+}

@@ -1,0 +1,195 @@
+{
+  "name": "Common: Error Handler Sub-workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "error-handler",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "error-webhook",
+      "name": "Error Input (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "error-handler-subworkflow",
+      "notes": "Nhận error data từ workflow chính: { workflowName, nodeName, errorMessage, executionId }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format error message tiếng Việt\nconst error = $input.first().json;\n\nconst formatted = {\n  workflow: error.workflowName || 'Unknown',\n  node: error.nodeName || 'Unknown',\n  error: error.errorMessage || 'Unknown error',\n  executionId: error.executionId || 'N/A',\n  timestamp: new Date().toISOString(),\n  timezone: 'Asia/Ho_Chi_Minh',\n  severity: error.errorMessage?.includes('timeout') ? 'high' : \n            error.errorMessage?.includes('rate limit') ? 'medium' : 'low'\n};\n\nreturn [{ json: formatted }];"
+      },
+      "id": "format-error",
+      "name": "Format Error Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Chuẩn hóa error message và xác định severity level"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "sev-check",
+              "leftValue": "={{ $json.severity }}",
+              "rightValue": "high",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "severity-check",
+      "name": "IF: High Severity?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Nếu lỗi nghiêm trọng → gửi alert ngay. Nếu không → chỉ log."
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "🚨 [CRITICAL] Workflow Error: {{ $json.workflow }}",
+        "message": "=⚠️ Lỗi nghiêm trọng trong workflow!\n\nWorkflow: {{ $json.workflow }}\nNode: {{ $json.node }}\nError: {{ $json.error }}\nTime: {{ $json.timestamp }}\n\nVui lòng kiểm tra ngay!",
+        "options": {}
+      },
+      "id": "alert-email",
+      "name": "Send Alert Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1000, 150],
+      "notes": "Gửi email alert cho admin khi lỗi nghiêm trọng. Cần cấu hình Gmail credential."
+    },
+    {
+      "parameters": {
+        "channel": "",
+        "text": "🚨 *Workflow Error Alert*\n\n*Workflow:* {{ $json.workflow }}\n*Node:* {{ $json.node }}\n*Error:* {{ $json.error }}\n*Time:* {{ $json.timestamp }}\n*Severity:* {{ $json.severity }}",
+        "otherOptions": {}
+      },
+      "id": "alert-slack",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1000, 450],
+      "notes": "Gửi message lên Slack channel #alerts. Cần cấu hình Slack credential."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "workflow": "={{ $json.workflow }}",
+            "node": "={{ $json.node }}",
+            "error": "={{ $json.error }}",
+            "timestamp": "={{ $json.timestamp }}",
+            "severity": "={{ $json.severity }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-sheets",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1250, 300],
+      "notes": "Log tất cả errors vào Google Sheets để theo dõi. Cần Sheet ID và credential."
+    }
+  ],
+  "connections": {
+    "Error Input (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Format Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error Message": {
+      "main": [
+        [
+          {
+            "node": "IF: High Severity?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: High Severity?": {
+      "main": [
+        [
+          {
+            "node": "Send Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Alert Email": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Alert": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["common", "error-handling", "sub-workflow", "reusable"],
+  "triggerCount": 0,
+  "versionId": "1.0.0",
+  "meta": {
+    "instanceId": "common-pattern"
+  }
+}

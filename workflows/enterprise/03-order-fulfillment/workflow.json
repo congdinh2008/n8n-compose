@@ -1,0 +1,294 @@
+{
+  "name": "Enterprise: Order Fulfillment",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-order",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "order-webhook",
+      "name": "Webhook (New Order)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "new-order-fulfillment",
+      "notes": "📦 Nhận đơn hàng mới từ website/Shopify. Body: { order_id, customer: {name, email, phone, address}, items: [{product, qty, price}], total, payment_method }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate order data\nconst order = $input.first().json.body || $input.first().json;\n\nif (!order.order_id || !order.customer || !order.items) {\n  throw new Error('Missing required order fields');\n}\n\nif (!order.customer.email || !order.customer.name) {\n  throw new Error('Missing customer info');\n}\n\n// Vietnamese phone validation\nlet phoneValid = true;\nif (order.customer.phone) {\n  const phoneRegex = /^(\\+84|0)[0-9]{9,10}$/;\n  phoneValid = phoneRegex.test(order.customer.phone.replace(/[\\s-]/g, ''));\n}\n\n// Calculate total from items\nconst calculatedTotal = order.items.reduce((sum, item) => {\n  return sum + ((item.qty || 1) * (item.price || 0));\n}, 0);\n\nconst sanitized = {\n  order_id: order.order_id,\n  customer: {\n    name: order.customer.name.trim(),\n    email: order.customer.email.toLowerCase().trim(),\n    phone: order.customer.phone?.trim() || '',\n    address: order.customer.address || '',\n    phone_valid: phoneValid\n  },\n  items: order.items,\n  total: order.total || calculatedTotal,\n  total_formatted: `${(order.total || calculatedTotal).toLocaleString('vi-VN')}đ`,\n  payment_method: order.payment_method || 'COD',\n  status: 'pending',\n  created_at: new Date().toISOString(),\n  timezone: 'Asia/Ho_Chi_Minh'\n};\n\nreturn [{ json: sanitized }];"
+      },
+      "id": "validate-order",
+      "name": "Validate Order Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Validate order data, tính tổng tiền, validate phone VN format."
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "column": "product_name",
+              "condition": "equal",
+              "value": "={{ $json.items[0].product }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "check-inventory",
+      "name": "Check Inventory (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [750, 300],
+      "notes": "⚠️ Kiểm tra tồn kho trong Google Sheets. Columns: product_name, sku, stock, price. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "stock-check",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "larger"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-in-stock",
+      "name": "IF: In Stock?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "notes": "Nếu có hàng → tiếp tục xử lý. Nếu hết hàng → thông báo cho khách."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customer.email }}",
+        "subject": "Xác nhận đơn hàng #{{ $json.order_id }}",
+        "message": "=Kính gửi {{ $json.customer.name }},\n\n✅ Đơn hàng của bạn đã được xác nhận!\n\n━━━━━━━━━━━━━━━━━━━━\n📦 CHI TIẾT ĐƠN HÀNG\n━━━━━━━━━━━━━━━━━━━━\n\nMã đơn hàng: #{{ $json.order_id }}\nNgày đặt: {{ $json.created_at }}\nPhương thức thanh toán: {{ $json.payment_method }}\n\nSản phẩm:\n{{ $json.items.map((item, i) => `${i + 1}. ${item.product} x${item.qty || 1} - ${(item.price || 0).toLocaleString('vi-VN')}đ`).join('\\n') }}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 TỔNG TIỀN: {{ $json.total_formatted }}\n━━━━━━━━━━━━━━━━━━━━\n\n📍 Giao hàng đến:\n{{ $json.customer.address }}\n\n📞 Liên hệ: {{ $json.customer.phone }}\n\n🚚 Đơn hàng sẽ được giao trong 2-3 ngày làm việc.\n\nTrân trọng,\nĐội ngũ bán hàng",
+        "options": {}
+      },
+      "id": "send-confirmation",
+      "name": "Send Order Confirmation Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 150],
+      "notes": "⚠️ Gửi email xác nhận đơn hàng cho khách. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "channel": "#orders",
+        "text": "📦 *Đơn hàng mới!*\\n\\n*Mã đơn:* #{{ $json.order_id }}\\n*Khách hàng:* {{ $json.customer.name }}\\n*SĐT:* {{ $json.customer.phone || 'Không có' }}\\n*Tổng tiền:* {{ $json.total_formatted }}\\n*Thanh toán:* {{ $json.payment_method }}\\n\\n_Sản phẩm:_\\n{{ $json.items.map(i => `• ${i.product} x${i.qty || 1}`).join('\\n') }}",
+        "otherOptions": {}
+      },
+      "id": "notify-warehouse",
+      "name": "Notify Warehouse (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1250, 450],
+      "notes": "⚠️ Thông báo cho kho đóng hàng qua Slack. Cần Slack OAuth."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "order_id": "={{ $json.order_id }}",
+            "customer_name": "={{ $json.customer.name }}",
+            "customer_email": "={{ $json.customer.email }}",
+            "customer_phone": "={{ $json.customer.phone }}",
+            "items": "={{ $json.items.map(i => `${i.product} x${i.qty || 1}`).join(', ') }}",
+            "total": "={{ $json.total }}",
+            "payment_method": "={{ $json.payment_method }}",
+            "status": "confirmed",
+            "created_at": "={{ $json.created_at }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-order",
+      "name": "Log Order to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1500, 300],
+      "notes": "⚠️ Lưu đơn hàng vào Google Sheets để theo dõi. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customer.email }}",
+        "subject": "Thông báo hết hàng - Đơn hàng #{{ $json.order_id }}",
+        "message": "=Kính gửi {{ $json.customer.name }},\n\n⚠️ Rất tiếc, một số sản phẩm trong đơn hàng của bạn tạm thời hết hàng.\n\nMã đơn hàng: #{{ $json.order_id }}\n\nChúng tôi sẽ liên hệ với bạn trong thời gian sớm nhất để:\n- Đề xuất sản phẩm thay thế\n- Hoàn tiền (nếu đã thanh toán)\n- Thông báo khi có hàng lại\n\nXin lỗi vì sự bất tiện này!\n\nTrân trọng,\nĐội ngũ bán hàng",
+        "options": {}
+      },
+      "id": "send-outof-stock",
+      "name": "Send Out of Stock Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 600],
+      "notes": "⚠️ Gửi email thông báo hết hàng cho khách. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Order processed successfully\",\n  \"order_id\": \"{{ $('Validate Order Data').first().json.order_id }}\",\n  \"status\": \"confirmed\",\n  \"total\": \"{{ $('Validate Order Data').first().json.total }}\"\n}",
+        "options": {}
+      },
+      "id": "response-node",
+      "name": "Return Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1750, 300],
+      "notes": "Trả về response cho webhook caller."
+    }
+  ],
+  "connections": {
+    "Webhook (New Order)": {
+      "main": [
+        [
+          {
+            "node": "Validate Order Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Order Data": {
+      "main": [
+        [
+          {
+            "node": "Check Inventory (Google Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Inventory (Google Sheets)": {
+      "main": [
+        [
+          {
+            "node": "IF: In Stock?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: In Stock?": {
+      "main": [
+        [
+          {
+            "node": "Send Order Confirmation Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Out of Stock Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Order Confirmation Email": {
+      "main": [
+        [
+          {
+            "node": "Notify Warehouse (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Warehouse (Slack)": {
+      "main": [
+        [
+          {
+            "node": "Log Order to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Order to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Return Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Out of Stock Email": {
+      "main": [
+        [
+          {
+            "node": "Return Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["enterprise", "ecommerce", "order", "fulfillment", "inventory"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-workflow",
+    "usage": "Dùng cho website bán hàng, Shopify, hoặc bất kỳ nguồn order nào. Webhook URL: https://your-n8n.com/webhook/new-order"
+  }
+}
