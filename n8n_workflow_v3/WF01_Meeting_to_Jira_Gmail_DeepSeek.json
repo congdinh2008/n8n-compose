@@ -1,0 +1,422 @@
+{
+  "name": "WF01 [DeepSeek] - Meeting Transcript to Jira + Gmail v1.1",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meeting-transcript",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "trigger-webhook",
+      "name": "Webhook: Receive Transcript",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "meeting-transcript-webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-transcript",
+              "name": "transcript",
+              "value": "={{ $json.body.transcript }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-meeting-title",
+              "name": "meeting_title",
+              "value": "={{ $json.body.meeting_title || 'Meeting ' + $now.format('yyyy-MM-dd HH:mm') }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-attendees",
+              "name": "attendees",
+              "value": "={{ $json.body.attendees || 'unknown' }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-meeting-date",
+              "name": "meeting_date",
+              "value": "={{ $json.body.meeting_date || $now.format('yyyy-MM-dd') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-context",
+      "name": "Set: Extract Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Bạn là chuyên gia phân tích cuộc họp engineering team Việt Nam.\n\nNhiệm vụ: Đọc transcript cuộc họp dưới đây và trích xuất thông tin có cấu trúc.\n\n<meeting_title>{{ $json.meeting_title }}</meeting_title>\n<meeting_date>{{ $json.meeting_date }}</meeting_date>\n<attendees>{{ $json.attendees }}</attendees>\n\n<transcript>\n{{ $json.transcript }}\n</transcript>\n\nOutput CHÍNH XÁC JSON theo schema sau (KHÔNG markdown wrap, chỉ JSON thuần):\n\n{\n  \"summary\": \"Tóm tắt 3-4 câu nội dung chính cuộc họp\",\n  \"decisions\": [\"Quyết định 1\", \"Quyết định 2\"],\n  \"action_items\": [\n    {\n      \"task\": \"Mô tả task cụ thể, action verb\",\n      \"owner\": \"Tên người được assign\",\n      \"deadline\": \"yyyy-mm-dd hoặc 'TBD' nếu không rõ\",\n      \"priority\": \"High|Medium|Low\",\n      \"estimated_hours\": 4\n    }\n  ],\n  \"risks\": [\"Risk 1 nếu có\", \"Risk 2\"],\n  \"open_questions\": [\"Câu hỏi chưa giải quyết\"]\n}\n\nRules:\n- Chỉ extract action items có owner cụ thể (không phải mơ hồ)\n- Priority dựa trên urgency mention trong meeting\n- Nếu transcript không rõ → trả mảng rỗng [] thay vì bịa\n- Output JSON THUẦN, không có ```json wrapper",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "basic-llm-chain-deepseek-claude-extract",
+      "name": "DeepSeek: Extract Action Items (Chain)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        680,
+        300
+      ],
+      "notes": "Basic LLM Chain — root node để execute Chat Model sub-node trên main path. Prompt được move từ Chat Model sang đây. Output: { \"text\": \"...\" } — downstream nodes phải reference $json.text thay vì $json.message.content."
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "deepseek-v4-pro",
+          "mode": "list"
+        },
+        "options": {
+          "maxTokens": 4000,
+          "temperature": 0.2
+        }
+      },
+      "id": "deepseek-claude-extract",
+      "name": "DeepSeek: Extract Action Items",
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        680,
+        500
+      ],
+      "credentials": {
+        "deepSeekApi": {
+          "id": "REPLACE_WITH_YOUR_DEEPSEEK_CREDENTIAL_ID",
+          "name": "DeepSeek - Class Shared"
+        }
+      },
+      "notes": "💡 DeepSeek version (deepseek-v4-pro). DeepSeek V4 Preview (24/4/2026). API OpenAI-compatible. Endpoint mặc định https://api.deepseek.com. reasoning_effort parameter chưa được expose qua n8n node v1 — sẽ ở non-thinking mode mặc định, đủ cho task này. Original Claude prompt được preserve để fair comparison."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude output\nconst response = $input.first().json;\n\n// Claude output có thể nested theo schema khác nhau\nlet rawText = '';\nif (response.message?.content) {\n  rawText = response.message.content;\n} else if (response.content) {\n  rawText = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);\n} else if (response.text) {\n  rawText = response.text;\n} else {\n  throw new Error('Cannot find Claude response text. Got: ' + JSON.stringify(response).substring(0, 200));\n}\n\n// Strip markdown wrapper nếu có\nrawText = rawText.replace(/^```json\\s*/, '').replace(/\\s*```$/, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(rawText);\n} catch (e) {\n  throw new Error('Claude returned invalid JSON: ' + rawText.substring(0, 300));\n}\n\n// Validate schema\nif (!parsed.action_items || !Array.isArray(parsed.action_items)) {\n  parsed.action_items = [];\n}\n\n// Get context from earlier nodes\nconst context = $('Set: Extract Context').first().json;\n\nreturn {\n  json: {\n    ...parsed,\n    meeting_title: context.meeting_title,\n    meeting_date: context.meeting_date,\n    attendees: context.attendees,\n    action_items_count: parsed.action_items.length,\n    has_actions: parsed.action_items.length > 0\n  }\n};"
+      },
+      "id": "code-parse",
+      "name": "Code: Parse & Validate JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "notes": "Parse JSON từ Claude + validate schema. Throw error nếu Claude trả invalid JSON → trigger retry hoặc alert."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-actions",
+              "leftValue": "={{ $json.has_actions }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-actions",
+      "name": "IF: Has Action Items?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "action_items",
+        "options": {}
+      },
+      "id": "split-items",
+      "name": "Split: One Item Per Row",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "project": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_PROJECT_KEY",
+          "mode": "list",
+          "cachedResultName": "DEMO"
+        },
+        "issueType": {
+          "__rl": true,
+          "value": "10001",
+          "mode": "list",
+          "cachedResultName": "Task"
+        },
+        "summary": "=[{{ $('Code: Parse & Validate JSON').first().json.meeting_title }}] {{ $json.task }}",
+        "additionalFields": {
+          "description": "=## Source\n**Meeting:** {{ $('Code: Parse & Validate JSON').first().json.meeting_title }}\n**Date:** {{ $('Code: Parse & Validate JSON').first().json.meeting_date }}\n**Owner:** {{ $json.owner }}\n**Deadline:** {{ $json.deadline }}\n**Priority:** {{ $json.priority }}\n**Estimated:** {{ $json.estimated_hours }}h\n\n## Task Detail\n{{ $json.task }}\n\n---\n*Auto-created bởi n8n từ meeting transcript*\n*Workflow: WF01 - Meeting to Jira*",
+          "labels": [
+            "meeting_auto",
+            "ai_generated"
+          ]
+        }
+      },
+      "id": "jira-create",
+      "name": "Jira: Create Task",
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        200
+      ],
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "REPLACE_WITH_YOUR_JIRA_CREDENTIAL_ID",
+          "name": "Jira Personal Cloud"
+        }
+      },
+      "notes": "⚠️ REPLACE 'REPLACE_WITH_YOUR_PROJECT_KEY' với key project Jira cá nhân của bạn (e.g., 'DEMO', 'TEST'). Issue type 10001 = Task (default Jira Cloud)."
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "aggregate-results",
+      "name": "Aggregate: Collect All Tasks",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Code: Parse & Validate JSON').first().json.attendees }}",
+        "subject": "=📋 [Meeting Summary] {{ $('Code: Parse & Validate JSON').first().json.meeting_title }}",
+        "emailType": "html",
+        "message": "=<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 700px; margin: 0 auto; padding: 20px; }\n    .header { background: #0B3D91; color: white; padding: 20px; border-radius: 8px 8px 0 0; }\n    .header h1 { margin: 0; font-size: 22px; }\n    .meta { font-size: 13px; opacity: 0.9; margin-top: 8px; }\n    .section { background: #f8fafc; padding: 16px 20px; border-left: 4px solid #F5A623; margin: 12px 0; border-radius: 4px; }\n    .section h2 { margin: 0 0 10px 0; font-size: 16px; color: #0B3D91; }\n    .task-item { background: white; padding: 12px; margin: 8px 0; border-radius: 4px; border: 1px solid #e5e7eb; }\n    .task-title { font-weight: 600; color: #0B3D91; }\n    .task-meta { font-size: 12px; color: #6b7280; margin-top: 4px; }\n    .pri-High { color: #dc2626; font-weight: bold; }\n    .pri-Medium { color: #d97706; }\n    .pri-Low { color: #059669; }\n    .footer { font-size: 11px; color: #9ca3af; margin-top: 20px; text-align: center; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>📋 {{ $('Code: Parse & Validate JSON').first().json.meeting_title }}</h1>\n    <div class=\"meta\">{{ $('Code: Parse & Validate JSON').first().json.meeting_date }} · {{ $('Code: Parse & Validate JSON').first().json.action_items_count }} action items tạo trong Jira</div>\n  </div>\n  \n  <div class=\"section\">\n    <h2>📝 Tóm tắt</h2>\n    <p>{{ $('Code: Parse & Validate JSON').first().json.summary }}</p>\n  </div>\n\n  <div class=\"section\">\n    <h2>✅ Quyết định</h2>\n    <ul>\n      {{ $('Code: Parse & Validate JSON').first().json.decisions.map(d => '<li>' + d + '</li>').join('') }}\n    </ul>\n  </div>\n\n  <div class=\"section\">\n    <h2>🎯 Action Items ({{ $('Code: Parse & Validate JSON').first().json.action_items_count }})</h2>\n    {{ $('Code: Parse & Validate JSON').first().json.action_items.map(a => '<div class=\"task-item\"><div class=\"task-title\">' + a.task + '</div><div class=\"task-meta\">👤 ' + a.owner + ' · 📅 ' + a.deadline + ' · <span class=\"pri-' + a.priority + '\">⚡ ' + a.priority + '</span> · ⏱ ' + a.estimated_hours + 'h</div></div>').join('') }}\n  </div>\n\n  <div class=\"section\">\n    <h2>⚠️ Risks & Open Questions</h2>\n    <strong>Risks:</strong>\n    <ul>{{ $('Code: Parse & Validate JSON').first().json.risks.map(r => '<li>' + r + '</li>').join('') }}</ul>\n    <strong>Open Questions:</strong>\n    <ul>{{ $('Code: Parse & Validate JSON').first().json.open_questions.map(q => '<li>' + q + '</li>').join('') }}</ul>\n  </div>\n\n  <div class=\"footer\">\n    🤖 Auto-generated bằng n8n + Claude AI<br>\n    Tất cả action items đã được tạo trong Jira tự động.<br>\n    VTI Academy — AIA-SME-2026 v2.0\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "gmail-send",
+      "name": "Gmail: Send Summary",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2000,
+        200
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      },
+      "notes": "Gửi HTML email summary cho attendees. NOTE: attendees field phải là email (e.g., 'a@x.com,b@y.com'). Nếu trong demo dùng email cá nhân của HV để test."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"meeting\": \"{{ $('Code: Parse & Validate JSON').first().json.meeting_title }}\",\n  \"tasks_created\": {{ $('Code: Parse & Validate JSON').first().json.action_items_count }},\n  \"summary\": \"{{ $('Code: Parse & Validate JSON').first().json.summary }}\"\n}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond: Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"no_actions\",\n  \"meeting\": \"{{ $json.meeting_title }}\",\n  \"summary\": \"{{ $json.summary }}\",\n  \"note\": \"Cuộc họp này không có action items rõ ràng. Không tạo Jira tasks.\"\n}",
+        "options": {}
+      },
+      "id": "respond-no-actions",
+      "name": "Respond: No Actions",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: Receive Transcript": {
+      "main": [
+        [
+          {
+            "node": "Set: Extract Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Extract Context": {
+      "main": [
+        [
+          {
+            "node": "DeepSeek: Extract Action Items (Chain)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse & Validate JSON": {
+      "main": [
+        [
+          {
+            "node": "IF: Has Action Items?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Has Action Items?": {
+      "main": [
+        [
+          {
+            "node": "Split: One Item Per Row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: No Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split: One Item Per Row": {
+      "main": [
+        [
+          {
+            "node": "Jira: Create Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jira: Create Task": {
+      "main": [
+        [
+          {
+            "node": "Aggregate: Collect All Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate: Collect All Tasks": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Send Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: Send Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond: Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek: Extract Action Items (Chain)": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse & Validate JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek: Extract Action Items": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "DeepSeek: Extract Action Items (Chain)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "meta": {
+    "templateCreator": "VTI Academy — AIA-SME-2026",
+    "description": "Workflow 1/4: Nhận transcript meeting qua webhook → AI extract action items → Tự động tạo Jira tasks + gửi HTML summary email"
+  },
+  "tags": [
+    {
+      "name": "VTI-AIA-2026",
+      "createdAt": "2026-04-15T00:00:00.000Z"
+    },
+    {
+      "name": "Buoi-4",
+      "createdAt": "2026-04-15T00:00:00.000Z"
+    },
+    {
+      "name": "DeepSeek"
+    }
+  ]
+}

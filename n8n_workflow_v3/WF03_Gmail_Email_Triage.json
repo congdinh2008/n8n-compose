@@ -1,0 +1,600 @@
+{
+  "name": "WF03 - Gmail Email Triage AI Agent v1.1",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "is:unread newer_than:1h -from:noreply -from:no-reply -category:promotions"
+        },
+        "options": {
+          "downloadAttachments": false
+        }
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger: New Unread Email",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      },
+      "notes": "Poll Gmail mỗi 1 phút. Filter: unread, < 1h, KHÔNG noreply, KHÔNG promotions. Tùy chỉnh filter theo nhu cầu."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "email_id",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "name": "from_email",
+              "value": "={{ $json.headers?.from || 'unknown' }}"
+            },
+            {
+              "name": "from_name",
+              "value": "={{ ($json.headers?.from || '').split('<')[0].trim().replace(/\"/g, '') }}"
+            },
+            {
+              "name": "subject",
+              "value": "={{ $json.headers?.subject || '(no subject)' }}"
+            },
+            {
+              "name": "body_text",
+              "value": "={{ ($json.text || $json.snippet || '').substring(0, 2000) }}"
+            },
+            {
+              "name": "received_at",
+              "value": "={{ $json.headers?.date || $now.toISO() }}"
+            },
+            {
+              "name": "thread_id",
+              "value": "={{ $json.threadId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-email-fields",
+      "name": "Set: Extract Email Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Bạn là email triage assistant cho Software Engineer Việt Nam (làm việc với client quốc tế + nội bộ).\n\nClassify email dưới đây:\n\n<from>{{ $json.from_name }} <{{ $json.from_email }}></from>\n<subject>{{ $json.subject }}</subject>\n<body>\n{{ $json.body_text }}\n</body>\n\nOutput JSON CHÍNH XÁC (KHÔNG markdown wrapper):\n\n{\n  \"priority\": \"High|Medium|Low\",\n  \"category\": \"action_required|information|fyi|spam|personal|newsletter|notification\",\n  \"sentiment\": \"positive|neutral|negative|urgent\",\n  \"needs_reply\": true,\n  \"reply_deadline_hours\": 24,\n  \"summary_vi\": \"Tóm tắt 1 câu nội dung chính bằng tiếng Việt\",\n  \"key_points\": [\"Điểm 1\", \"Điểm 2\"],\n  \"suggested_reply_draft\": \"Draft reply ngắn 2-3 câu nếu needs_reply=true, otherwise null\",\n  \"create_jira_task\": false,\n  \"jira_task_title\": null,\n  \"reasoning\": \"1 câu giải thích priority assignment\"\n}\n\nRules:\n- HIGH: client urgent, blocker, security incident, deadline today, manager direct\n- MEDIUM: client question requires investigation, internal request có deadline > 1 day\n- LOW: FYI, notifications, automated, không cần action\n- create_jira_task=true CHỈ KHI email request CỤ THỂ task technical cần track\n- summary_vi: ngôn ngữ tự nhiên, KHÔNG dịch máy\n- Output JSON THUẦN",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "basic-llm-chain-claude-classify",
+      "name": "Claude Haiku: Classify Email (Chain)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        680,
+        300
+      ],
+      "notes": "Basic LLM Chain — root node để execute Chat Model sub-node trên main path. Prompt được move từ Chat Model sang đây. Output: { \"text\": \"...\" } — downstream nodes phải reference $json.text thay vì $json.message.content."
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-haiku-4-5-20251001",
+          "mode": "list"
+        },
+        "options": {
+          "maxTokensToSample": 1500,
+          "temperature": 0.1
+        }
+      },
+      "id": "claude-classify",
+      "name": "Claude Haiku: Classify Email",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.2,
+      "position": [
+        680,
+        500
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_WITH_YOUR_ANTHROPIC_CREDENTIAL_ID",
+          "name": "Anthropic - Class Shared"
+        }
+      },
+      "notes": "Dùng Haiku 4.5 (cheapest, fastest) cho classification task — temperature 0.1 cho consistency. ~$0.001/email. 1000 emails/tháng = $1."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse + validate Claude classification\nconst response = $input.first().json;\nlet rawText = '';\nif (response.message?.content) rawText = response.message.content;\nelse if (response.content) rawText = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);\nelse if (response.text) rawText = response.text;\nelse throw new Error('Cannot find Claude response');\n\nrawText = rawText.replace(/^```json\\s*/, '').replace(/\\s*```$/, '').trim();\n\nlet classification;\ntry {\n  classification = JSON.parse(rawText);\n} catch (e) {\n  throw new Error('Invalid JSON: ' + rawText.substring(0, 200));\n}\n\nconst email = $('Set: Extract Email Fields').first().json;\n\nreturn {\n  json: {\n    ...email,\n    ...classification,\n    routing_decision: classification.priority === 'High' ? 'alert' : classification.priority === 'Low' ? 'archive' : 'review'\n  }\n};"
+      },
+      "id": "code-parse-classification",
+      "name": "Code: Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "high-priority",
+                    "leftValue": "={{ $json.priority }}",
+                    "rightValue": "High",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "HIGH"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "spam",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "spam",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SPAM"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "low-fyi",
+                    "leftValue": "={{ $json.priority }}",
+                    "rightValue": "Low",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "LOW"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "MEDIUM"
+        }
+      },
+      "id": "switch-priority",
+      "name": "Switch: Route by Priority",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.email_id }}",
+        "labelIds": [
+          "REPLACE_WITH_HIGH_LABEL_ID"
+        ]
+      },
+      "id": "gmail-label-high",
+      "name": "Gmail: Add HIGH Label",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1340,
+        100
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      },
+      "notes": "⚠️ Tạo label '🔴 HIGH-PRIORITY' trong Gmail trước → copy label ID → paste vào đây. Hoặc dùng label name string."
+    },
+    {
+      "parameters": {
+        "sendTo": "REPLACE_WITH_YOUR_OWN_EMAIL@gmail.com",
+        "subject": "=🚨 [HIGH PRIORITY] {{ $json.subject }}",
+        "emailType": "html",
+        "message": "=<!DOCTYPE html>\n<html><head><style>\n  body { font-family: Arial; background: #FEF2F2; padding: 20px; }\n  .alert { background: white; border-left: 6px solid #DC2626; padding: 20px; border-radius: 6px; }\n  .alert h2 { color: #DC2626; margin: 0 0 12px 0; }\n  .meta { color: #6b7280; font-size: 13px; margin: 12px 0; }\n  .summary { background: #FEF3C7; padding: 12px; border-radius: 4px; margin: 12px 0; }\n  .reply-draft { background: #F0FDF4; border-left: 3px solid #059669; padding: 12px; margin: 12px 0; font-style: italic; }\n  .actions a { display: inline-block; background: #0B3D91; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; margin: 4px; }\n</style></head>\n<body>\n  <div class=\"alert\">\n    <h2>🚨 HIGH PRIORITY EMAIL</h2>\n    <div class=\"meta\">\n      <strong>From:</strong> {{ $json.from_name }} ({{ $json.from_email }})<br>\n      <strong>Subject:</strong> {{ $json.subject }}<br>\n      <strong>Received:</strong> {{ $json.received_at }}<br>\n      <strong>Reply deadline:</strong> within {{ $json.reply_deadline_hours }}h\n    </div>\n    <div class=\"summary\">\n      <strong>📝 Summary:</strong> {{ $json.summary_vi }}<br><br>\n      <strong>🔑 Key Points:</strong>\n      <ul>{{ $json.key_points.map(p => '<li>' + p + '</li>').join('') }}</ul>\n      <strong>🤖 AI Reasoning:</strong> {{ $json.reasoning }}\n    </div>\n    {{ $json.suggested_reply_draft ? '<div class=\"reply-draft\"><strong>💡 Suggested Reply:</strong><br>' + $json.suggested_reply_draft + '</div>' : '' }}\n    <div class=\"actions\">\n      <a href=\"https://mail.google.com/mail/u/0/#inbox/{{ $json.thread_id }}\">📧 Open in Gmail</a>\n    </div>\n  </div>\n</body></html>",
+        "options": {}
+      },
+      "id": "gmail-alert",
+      "name": "Gmail: Self-Alert HIGH",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1560,
+        100
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      },
+      "notes": "Send alert email tới CHÍNH email của bạn với prefix [HIGH PRIORITY] → mobile push notification kích hoạt."
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.email_id }}",
+        "labelIds": [
+          "REPLACE_WITH_MEDIUM_LABEL_ID"
+        ]
+      },
+      "id": "gmail-label-medium",
+      "name": "Gmail: Add MEDIUM Label",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1340,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.email_id }}",
+        "labelIds": [
+          "REPLACE_WITH_LOW_LABEL_ID"
+        ]
+      },
+      "id": "gmail-label-low",
+      "name": "Gmail: Add LOW Label + Archive",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1340,
+        500
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $json.email_id }}"
+      },
+      "id": "gmail-archive-low",
+      "name": "Gmail: Mark Read (Low)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1560,
+        500
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.email_id }}",
+        "labelIds": [
+          "REPLACE_WITH_SPAM_LABEL_ID"
+        ]
+      },
+      "id": "gmail-label-spam",
+      "name": "Gmail: Label SPAM",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1340,
+        700
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "need-jira-task",
+              "leftValue": "={{ $json.create_jira_task }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-need-jira",
+      "name": "IF: Need Jira Task?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1780,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "project": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_PROJECT_KEY",
+          "mode": "list",
+          "cachedResultName": "DEMO"
+        },
+        "issueType": {
+          "__rl": true,
+          "value": "10001",
+          "mode": "list",
+          "cachedResultName": "Task"
+        },
+        "summary": "=[Email] {{ $json.jira_task_title || $json.subject }}",
+        "additionalFields": {
+          "description": "=## From Email\n**From:** {{ $json.from_name }} ({{ $json.from_email }})\n**Subject:** {{ $json.subject }}\n**Received:** {{ $json.received_at }}\n\n## AI Analysis\n**Priority:** {{ $json.priority }}\n**Category:** {{ $json.category }}\n**Summary:** {{ $json.summary_vi }}\n\n**Key Points:**\n{{ $json.key_points.map(p => '- ' + p).join('\\n') }}\n\n## Email Body\n{{ $json.body_text }}\n\n---\n*Auto-created từ email triage AI · Workflow: WF03*",
+          "labels": [
+            "email-auto",
+            "ai-triaged"
+          ],
+          "priority": {
+            "name": "={{ $json.priority }}"
+          }
+        }
+      },
+      "id": "jira-from-email",
+      "name": "Jira: Create Task from Email",
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        100
+      ],
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "REPLACE_WITH_YOUR_JIRA_CREDENTIAL_ID",
+          "name": "Jira Personal Cloud"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger: New Unread Email": {
+      "main": [
+        [
+          {
+            "node": "Set: Extract Email Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Extract Email Fields": {
+      "main": [
+        [
+          {
+            "node": "Claude Haiku: Classify Email (Chain)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse Classification": {
+      "main": [
+        [
+          {
+            "node": "Switch: Route by Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: Route by Priority": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Add HIGH Label",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail: Label SPAM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail: Add LOW Label + Archive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail: Add MEDIUM Label",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: Add HIGH Label": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Self-Alert HIGH",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: Self-Alert HIGH": {
+      "main": [
+        [
+          {
+            "node": "IF: Need Jira Task?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Need Jira Task?": {
+      "main": [
+        [
+          {
+            "node": "Jira: Create Task from Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Gmail: Add LOW Label + Archive": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Mark Read (Low)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Haiku: Classify Email (Chain)": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Haiku: Classify Email": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Claude Haiku: Classify Email (Chain)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "executionTimeout": 300
+  },
+  "meta": {
+    "templateCreator": "VTI Academy — AIA-SME-2026",
+    "description": "Workflow 3/4: Gmail trigger mỗi phút → Claude Haiku classify priority/category → Route: HIGH=alert, SPAM=label, LOW=archive, MEDIUM=label. Optional Jira task creation."
+  },
+  "tags": [
+    {
+      "name": "VTI-AIA-2026",
+      "createdAt": "2026-04-15T00:00:00.000Z"
+    },
+    {
+      "name": "Buoi-5",
+      "createdAt": "2026-04-15T00:00:00.000Z"
+    }
+  ]
+}

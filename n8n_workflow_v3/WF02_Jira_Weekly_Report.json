@@ -1,0 +1,286 @@
+{
+  "name": "WF02 - Jira Weekly Report Auto-Generator v1.1",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                5
+              ],
+              "triggerAtHour": 17,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Cron: Every Friday 17:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "notes": "Trigger weekly Friday 5pm Asia/Ho_Chi_Minh. Có thể manual trigger để test."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "report_period_start",
+              "value": "={{ $now.minus({ days: 7 }).format('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "report_period_end",
+              "value": "={{ $now.format('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "report_week",
+              "value": "={{ 'Week ' + $now.format('w') + ' (' + $now.minus({ days: 7 }).format('dd/MM') + ' - ' + $now.format('dd/MM/yyyy') + ')' }}"
+            },
+            {
+              "name": "jql_query",
+              "value": "=project = REPLACE_WITH_YOUR_PROJECT_KEY AND updated >= -7d ORDER BY status, priority DESC"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-report-period",
+      "name": "Set: Report Period",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        300
+      ],
+      "notes": "⚠️ REPLACE 'REPLACE_WITH_YOUR_PROJECT_KEY' với key project Jira cá nhân của bạn."
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 100,
+        "options": {
+          "jql": "={{ $json.jql_query }}",
+          "fields": "summary,status,assignee,priority,created,updated,resolutiondate,issuetype,labels"
+        }
+      },
+      "id": "jira-fetch",
+      "name": "Jira: Fetch Tickets (Last 7 days)",
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "REPLACE_WITH_YOUR_JIRA_CREDENTIAL_ID",
+          "name": "Jira Personal Cloud"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Group tickets by status + calculate metrics\nconst tickets = $input.all().map(item => item.json);\n\nconst byStatus = {};\nconst byAssignee = {};\nlet totalDone = 0;\nlet totalInProgress = 0;\nlet totalTodo = 0;\nlet totalBugs = 0;\nlet highPriority = [];\n\nfor (const t of tickets) {\n  const status = t.fields?.status?.name || 'Unknown';\n  const assignee = t.fields?.assignee?.displayName || 'Unassigned';\n  const priority = t.fields?.priority?.name || 'None';\n  const issueType = t.fields?.issuetype?.name || 'Task';\n  \n  // By status\n  if (!byStatus[status]) byStatus[status] = [];\n  byStatus[status].push({\n    key: t.key,\n    summary: t.fields?.summary || '(no title)',\n    assignee,\n    priority,\n    type: issueType\n  });\n  \n  // By assignee\n  if (!byAssignee[assignee]) byAssignee[assignee] = { done: 0, in_progress: 0, todo: 0 };\n  if (status.toLowerCase().includes('done') || status.toLowerCase().includes('closed')) {\n    byAssignee[assignee].done++;\n    totalDone++;\n  } else if (status.toLowerCase().includes('progress')) {\n    byAssignee[assignee].in_progress++;\n    totalInProgress++;\n  } else {\n    byAssignee[assignee].todo++;\n    totalTodo++;\n  }\n  \n  if (issueType.toLowerCase() === 'bug') totalBugs++;\n  if (priority === 'High' || priority === 'Highest') {\n    highPriority.push({\n      key: t.key,\n      summary: t.fields?.summary,\n      status,\n      assignee\n    });\n  }\n}\n\nconst total = tickets.length;\nconst completionRate = total > 0 ? Math.round((totalDone / total) * 100) : 0;\n\nreturn {\n  json: {\n    period: $('Set: Report Period').first().json,\n    metrics: {\n      total_tickets: total,\n      done: totalDone,\n      in_progress: totalInProgress,\n      todo: totalTodo,\n      bugs: totalBugs,\n      completion_rate: completionRate,\n      high_priority_count: highPriority.length\n    },\n    by_status: byStatus,\n    by_assignee: byAssignee,\n    high_priority_tickets: highPriority,\n    raw_tickets: tickets.slice(0, 50)\n  }\n};"
+      },
+      "id": "code-aggregate",
+      "name": "Code: Aggregate Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "notes": "Group tickets by status + assignee, calc completion rate, identify high-priority items, count bugs."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Bạn là Engineering Manager senior. Viết weekly report narrative cho team dựa trên metrics Jira dưới đây.\n\n<period>{{ $json.period.report_week }}</period>\n\n<metrics>\n{{ JSON.stringify($json.metrics, null, 2) }}\n</metrics>\n\n<status_breakdown>\n{{ JSON.stringify($json.by_status, null, 2) }}\n</status_breakdown>\n\n<assignee_breakdown>\n{{ JSON.stringify($json.by_assignee, null, 2) }}\n</assignee_breakdown>\n\n<high_priority_items>\n{{ JSON.stringify($json.high_priority_tickets, null, 2) }}\n</high_priority_items>\n\nViết report 4 sections theo schema JSON CHÍNH XÁC (KHÔNG markdown wrapper):\n\n{\n  \"highlight\": \"1 câu nêu THÀNH TỰU lớn nhất tuần này (bullet-worthy)\",\n  \"done_this_week\": \"2-3 đoạn về việc đã hoàn thành. Mention assignee + ticket counts. Tone professional, factual.\",\n  \"blockers_and_risks\": \"2-3 đoạn về blockers, high-priority items đang stuck, bugs cần attention. Risk assessment ngắn gọn.\",\n  \"next_week_focus\": \"2-3 đoạn về ưu tiên tuần tới dựa trên tickets còn To-Do + In Progress. Recommend action.\",\n  \"team_health_score\": 8\n}\n\nRules:\n- Tone: professional, không hype, dùng số liệu cụ thể\n- Mention ticket keys (e.g., DEMO-123) khi reference\n- team_health_score: 1-10 dựa trên completion_rate, blockers, balance workload\n- Tiếng Việt natural cho engineering audience VN\n- Output JSON THUẦN",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "basic-llm-chain-claude-narrative",
+      "name": "Claude: Generate Narrative (Chain)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        1120,
+        300
+      ],
+      "notes": "Basic LLM Chain — root node để execute Chat Model sub-node trên main path. Prompt được move từ Chat Model sang đây. Output: { \"text\": \"...\" } — downstream nodes phải reference $json.text thay vì $json.message.content."
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-5-20250929",
+          "mode": "list"
+        },
+        "options": {
+          "maxTokensToSample": 3000,
+          "temperature": 0.3
+        }
+      },
+      "id": "claude-narrative",
+      "name": "Claude: Generate Narrative",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.2,
+      "position": [
+        1120,
+        500
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_WITH_YOUR_ANTHROPIC_CREDENTIAL_ID",
+          "name": "Anthropic - Class Shared"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude narrative + merge với metrics data\nconst response = $input.first().json;\n\nlet rawText = '';\nif (response.message?.content) rawText = response.message.content;\nelse if (response.content) rawText = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);\nelse if (response.text) rawText = response.text;\nelse throw new Error('Cannot find Claude response');\n\nrawText = rawText.replace(/^```json\\s*/, '').replace(/\\s*```$/, '').trim();\n\nlet narrative;\ntry {\n  narrative = JSON.parse(rawText);\n} catch (e) {\n  throw new Error('Claude narrative invalid JSON: ' + rawText.substring(0, 300));\n}\n\nconst data = $('Code: Aggregate Metrics').first().json;\n\nreturn {\n  json: {\n    ...narrative,\n    period: data.period,\n    metrics: data.metrics,\n    by_status: data.by_status,\n    by_assignee: data.by_assignee,\n    high_priority_tickets: data.high_priority_tickets\n  }\n};"
+      },
+      "id": "code-merge",
+      "name": "Code: Merge Narrative + Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "REPLACE_WITH_RECIPIENT_EMAIL@gmail.com",
+        "subject": "=📊 Weekly Engineering Report — {{ $json.period.report_week }}",
+        "emailType": "html",
+        "message": "=<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 800px; margin: 0 auto; padding: 0; background: #f9fafb; }\n    .container { background: white; padding: 0; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }\n    .header { background: linear-gradient(135deg, #0B3D91 0%, #1E5BA8 100%); color: white; padding: 30px; }\n    .header h1 { margin: 0; font-size: 24px; }\n    .header .subtitle { font-size: 14px; opacity: 0.9; margin-top: 6px; }\n    .highlight-bar { background: #FEF3C7; border-left: 4px solid #F5A623; padding: 14px 20px; margin: 20px; font-weight: 600; color: #92400E; }\n    .metrics-grid { display: table; width: calc(100% - 40px); margin: 20px; table-layout: fixed; }\n    .metric-cell { display: table-cell; background: white; border: 1px solid #e5e7eb; padding: 16px; text-align: center; border-radius: 6px; }\n    .metric-num { font-size: 32px; font-weight: 700; color: #0B3D91; line-height: 1; }\n    .metric-label { font-size: 12px; color: #6b7280; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }\n    .section { padding: 0 20px 20px; }\n    .section h2 { color: #0B3D91; border-bottom: 2px solid #F5A623; padding-bottom: 6px; font-size: 18px; margin-top: 24px; }\n    .section p { margin: 10px 0; }\n    .health-score { text-align: center; margin: 20px; padding: 20px; background: #F0FDF4; border: 2px solid #059669; border-radius: 8px; }\n    .health-num { font-size: 48px; font-weight: 700; color: #059669; line-height: 1; }\n    .health-label { font-size: 13px; color: #065F46; margin-top: 4px; }\n    .priority-list { background: #FEF2F2; border-left: 4px solid #DC2626; padding: 12px 16px; margin: 10px 0; border-radius: 4px; }\n    .priority-item { padding: 6px 0; border-bottom: 1px dashed #FCA5A5; }\n    .priority-item:last-child { border-bottom: none; }\n    .pri-key { font-family: 'Courier New', monospace; background: #DC2626; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; }\n    .footer { background: #f3f4f6; padding: 16px 20px; text-align: center; font-size: 11px; color: #6b7280; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>📊 Weekly Engineering Report</h1>\n      <div class=\"subtitle\">{{ $json.period.report_week }} · Auto-generated bởi n8n + Claude AI</div>\n    </div>\n\n    <div class=\"highlight-bar\">\n      🌟 {{ $json.highlight }}\n    </div>\n\n    <div class=\"metrics-grid\">\n      <div class=\"metric-cell\">\n        <div class=\"metric-num\">{{ $json.metrics.total_tickets }}</div>\n        <div class=\"metric-label\">Total Tickets</div>\n      </div>\n      <div class=\"metric-cell\">\n        <div class=\"metric-num\" style=\"color: #059669\">{{ $json.metrics.done }}</div>\n        <div class=\"metric-label\">Done</div>\n      </div>\n      <div class=\"metric-cell\">\n        <div class=\"metric-num\" style=\"color: #D97706\">{{ $json.metrics.in_progress }}</div>\n        <div class=\"metric-label\">In Progress</div>\n      </div>\n      <div class=\"metric-cell\">\n        <div class=\"metric-num\" style=\"color: #DC2626\">{{ $json.metrics.bugs }}</div>\n        <div class=\"metric-label\">Bugs</div>\n      </div>\n    </div>\n\n    <div class=\"section\">\n      <h2>✅ Done This Week ({{ $json.metrics.completion_rate }}% completion)</h2>\n      <p>{{ $json.done_this_week }}</p>\n    </div>\n\n    <div class=\"section\">\n      <h2>⚠️ Blockers & Risks</h2>\n      <p>{{ $json.blockers_and_risks }}</p>\n      \n      {{ $json.high_priority_tickets.length > 0 ? '<div class=\"priority-list\"><strong>🚨 High Priority Items:</strong>' + $json.high_priority_tickets.slice(0, 5).map(t => '<div class=\"priority-item\"><span class=\"pri-key\">' + t.key + '</span> ' + t.summary + ' · ' + t.status + ' · 👤 ' + t.assignee + '</div>').join('') + '</div>' : '<p style=\"color:#059669\"><em>✓ Không có high-priority items đang stuck.</em></p>' }}\n    </div>\n\n    <div class=\"section\">\n      <h2>🎯 Next Week Focus</h2>\n      <p>{{ $json.next_week_focus }}</p>\n    </div>\n\n    <div class=\"health-score\">\n      <div class=\"health-num\">{{ $json.team_health_score }}/10</div>\n      <div class=\"health-label\">Team Health Score (theo AI assessment)</div>\n    </div>\n\n    <div class=\"footer\">\n      🤖 Auto-generated bằng n8n self-hosted + Claude Sonnet 4.5<br>\n      Report khoảng thời gian: {{ $json.period.report_period_start }} → {{ $json.period.report_period_end }}<br>\n      VTI Academy — AIA-SME-2026 v2.0\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "gmail-send-report",
+      "name": "Gmail: Send Weekly Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1560,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      },
+      "notes": "⚠️ REPLACE 'REPLACE_WITH_RECIPIENT_EMAIL@gmail.com' với email của bạn (PM, stakeholders). Có thể dùng email cá nhân của HV để test."
+    }
+  ],
+  "connections": {
+    "Cron: Every Friday 17:00": {
+      "main": [
+        [
+          {
+            "node": "Set: Report Period",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Report Period": {
+      "main": [
+        [
+          {
+            "node": "Jira: Fetch Tickets (Last 7 days)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jira: Fetch Tickets (Last 7 days)": {
+      "main": [
+        [
+          {
+            "node": "Code: Aggregate Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Aggregate Metrics": {
+      "main": [
+        [
+          {
+            "node": "Claude: Generate Narrative (Chain)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Merge Narrative + Data": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Send Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Generate Narrative (Chain)": {
+      "main": [
+        [
+          {
+            "node": "Code: Merge Narrative + Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Generate Narrative": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Claude: Generate Narrative (Chain)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "meta": {
+    "templateCreator": "VTI Academy — AIA-SME-2026",
+    "description": "Workflow 2/4: Tự động generate weekly report từ Jira mỗi thứ 6 17h. AI viết narrative + send HTML email đẹp."
+  },
+  "tags": [
+    {
+      "name": "VTI-AIA-2026",
+      "createdAt": "2026-04-15T00:00:00.000Z"
+    },
+    {
+      "name": "Buoi-4",
+      "createdAt": "2026-04-15T00:00:00.000Z"
+    }
+  ]
+}

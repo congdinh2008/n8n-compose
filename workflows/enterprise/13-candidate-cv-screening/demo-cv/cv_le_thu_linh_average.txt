@@ -1,0 +1,29 @@
+Le Thu Linh
+Junior Web Developer
+Email: thu.linh@example.com
+Phone: 0903003003
+Location: Hanoi
+
+Summary
+Junior web developer with 1.5 years of experience maintaining websites and simple admin pages. Interested in frontend development and learning React.
+
+Experience
+Web Developer, Local Marketing Agency, 2024-2026
+- Maintained WordPress websites, landing pages, and simple HTML/CSS pages.
+- Updated UI content based on marketing requests.
+- Built a few small React components for internal admin pages.
+- Consumed simple REST APIs for contact forms and campaign statistics.
+- Fixed responsive layout issues on mobile.
+
+Intern Developer, 2023
+- Supported QA and content updates for client websites.
+- Learned JavaScript basics, Git workflow, and CSS responsive techniques.
+
+Skills
+HTML, CSS, JavaScript, basic React, WordPress, Bootstrap, Git.
+
+Education
+Bachelor of Computer Science, Hanoi Open University.
+
+Languages
+Vietnamese native, English basic.

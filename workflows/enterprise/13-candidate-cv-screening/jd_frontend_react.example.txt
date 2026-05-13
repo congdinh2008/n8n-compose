@@ -1,0 +1,25 @@
+Vi tri: Frontend React Developer
+
+Muc tieu tuyen dung:
+Tim ung vien Frontend React Developer co kha nang xay dung UI production cho SaaS/CRM, lam viec tot voi API, toi uu performance va phoi hop voi backend/product.
+
+Yeu cau bat buoc:
+- 3+ nam kinh nghiem frontend web.
+- Thanh thao React, TypeScript, JavaScript ES6+.
+- Co kinh nghiem state management: Redux Toolkit, Zustand, React Query hoac tuong duong.
+- Hieu REST API, authentication flow, error/loading states.
+- Co kinh nghiem responsive UI, component design, accessibility co ban.
+- Biet test frontend bang Jest, React Testing Library, Playwright/Cypress la loi the.
+- Co kha nang doc hieu requirement, lam viec voi designer/product.
+
+Yeu cau uu tien:
+- Da lam SaaS dashboard, CRM, admin portal hoac ecommerce.
+- Biet Next.js, performance optimization, code splitting.
+- Co kinh nghiem mentoring junior hoac review code.
+- Tieng Anh doc viet tot.
+
+Tieu chi danh gia:
+- Excellent: match >= 85, co kinh nghiem React/TypeScript sau, da lam san pham production, co testing/performance, giao tiep tot.
+- Good: match 70-84, dap ung phan lon yeu cau bat buoc nhung thieu 1-2 diem uu tien.
+- Average: match 50-69, co nen tang frontend nhung kinh nghiem chua sau hoac thieu TypeScript/testing.
+- Reject: match < 50 hoac khong lien quan vi tri.

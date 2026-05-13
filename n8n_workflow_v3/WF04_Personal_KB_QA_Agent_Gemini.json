@@ -1,0 +1,443 @@
+{
+  "name": "WF04 [Gemini] - Personal Knowledge Q&A Agent (Email-triggered RAG) v1.1",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "is:unread subject:[ASK BOT]"
+        },
+        "options": {
+          "downloadAttachments": false
+        }
+      },
+      "id": "gmail-trigger-ask",
+      "name": "Gmail Trigger: [ASK BOT] Subject",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      },
+      "notes": "Trigger trên emails có subject bắt đầu [ASK BOT]. Workflow này = chatbot Q&A đơn giản qua email — user gửi email hỏi, bot reply.\n\nMục đích: Demo RAG pattern đơn giản trên n8n Community. Buổi 12 chúng ta sẽ build proper RAG với vector DB."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "question",
+              "value": "={{ ($json.text || $json.snippet || '').substring(0, 1000) }}"
+            },
+            {
+              "name": "asker_email",
+              "value": "={{ ($json.headers?.from || '').match(/<(.+)>/) ? ($json.headers?.from || '').match(/<(.+)>/)[1] : $json.headers?.from }}"
+            },
+            {
+              "name": "asker_name",
+              "value": "={{ ($json.headers?.from || '').split('<')[0].trim().replace(/\"/g, '') }}"
+            },
+            {
+              "name": "original_subject",
+              "value": "={{ $json.headers?.subject }}"
+            },
+            {
+              "name": "thread_id",
+              "value": "={{ $json.threadId }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-question",
+      "name": "Set: Extract Question",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "='REPLACE_WITH_YOUR_KB_FOLDER_ID' in parents and (mimeType='application/vnd.google-apps.document' or mimeType='text/plain' or mimeType='text/markdown') and trashed=false"
+            },
+            {
+              "name": "fields",
+              "value": "files(id,name,mimeType,modifiedTime)"
+            },
+            {
+              "name": "pageSize",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "drive-list-kb",
+      "name": "Drive: List KB Files",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GDRIVE_CREDENTIAL_ID",
+          "name": "Google Drive Personal"
+        }
+      },
+      "notes": "List tất cả docs trong KB folder Google Drive cá nhân. ⚠️ REPLACE 'REPLACE_WITH_YOUR_KB_FOLDER_ID' với folder ID từ URL Google Drive."
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "files",
+        "options": {}
+      },
+      "id": "split-files",
+      "name": "Split: Each KB File",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.id }}/export?mimeType=text/plain",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "drive-download",
+      "name": "Drive: Download File Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        300
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GDRIVE_CREDENTIAL_ID",
+          "name": "Google Drive Personal"
+        }
+      },
+      "notes": "Download content of each KB file as plain text. Google Docs export → text/plain."
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "aggregate-kb",
+      "name": "Aggregate: All KB Content",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build combined KB context (simple concat, no vector search)\n// Buổi 12 chúng ta upgrade lên proper RAG với vector DB.\n\nconst items = $input.first().json.data || [];\nconst question = $('Set: Extract Question').first().json.question;\n\nlet kbContext = '';\nlet totalLength = 0;\nconst MAX_LENGTH = 100000; // 100k chars ~ 25k tokens\n\nfor (const item of items) {\n  const content = typeof item === 'string' ? item : (item.body || item.data || JSON.stringify(item));\n  if (totalLength + content.length > MAX_LENGTH) {\n    kbContext += '\\n\\n[... content truncated ...]';\n    break;\n  }\n  kbContext += '\\n\\n---\\n' + content;\n  totalLength += content.length;\n}\n\nif (!kbContext) {\n  kbContext = '(Knowledge Base trống. Vui lòng upload docs vào KB folder.)';\n}\n\nreturn {\n  json: {\n    question,\n    kb_content: kbContext,\n    kb_char_length: totalLength,\n    asker_email: $('Set: Extract Question').first().json.asker_email,\n    asker_name: $('Set: Extract Question').first().json.asker_name,\n    original_subject: $('Set: Extract Question').first().json.original_subject,\n    thread_id: $('Set: Extract Question').first().json.thread_id,\n    message_id: $('Set: Extract Question').first().json.message_id\n  }\n};"
+      },
+      "id": "code-build-context",
+      "name": "Code: Build KB Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ],
+      "notes": "Concat all KB files (max 100k chars). Simple version — Buổi 12 chúng ta upgrade RAG proper với vector DB + semantic search."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Bạn là Knowledge Base Q&A assistant. Trả lời câu hỏi DỰA VÀO context KB dưới đây.\n\n<knowledge_base>\n{{ $json.kb_content }}\n</knowledge_base>\n\n<question>\n{{ $json.question }}\n</question>\n\nRules:\n1. CHỈ trả lời dựa vào context KB ở trên. KHÔNG bịa thông tin.\n2. Nếu KB không có thông tin liên quan → trả lời rõ: \"Em không tìm thấy thông tin về câu hỏi này trong KB. Anh/chị có thể bổ sung tài liệu vào folder KB nhé.\"\n3. Cite source khi có thể (mention tên doc nếu thấy trong context).\n4. Tone: professional, friendly, ngắn gọn (3-5 câu).\n5. Ngôn ngữ: tiếng Việt (default) hoặc tiếng Anh nếu question bằng tiếng Anh.\n6. Format: plain text với 1-2 bullet nếu cần. KHÔNG markdown.\n7. Cuối reply ALWAYS có ghi chú: '\\n\\n— Auto-reply bởi Knowledge Base AI Bot · KB updated mới nhất...' (em viết câu này)\n\nTrả lời trực tiếp, không có greeting dài dòng.",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "basic-llm-chain-gemini-claude-answer",
+      "name": "Gemini: Answer from KB (Chain)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        1780,
+        300
+      ],
+      "notes": "Basic LLM Chain — root node để execute Chat Model sub-node trên main path. Prompt được move từ Chat Model sang đây. Output: { \"text\": \"...\" } — downstream nodes phải reference $json.text thay vì $json.message.content."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3-pro-preview",
+        "options": {
+          "maxOutputTokens": 1500,
+          "temperature": 0.3
+        }
+      },
+      "id": "gemini-claude-answer",
+      "name": "Gemini: Answer from KB",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        500
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "REPLACE_WITH_YOUR_GEMINI_CREDENTIAL_ID",
+          "name": "Google Gemini - Class Shared"
+        }
+      },
+      "notes": "💡 Gemini version (models/gemini-3-pro-preview). Gemini node KHÔNG hỗ trợ response_schema natively — JSON output phụ thuộc vào prompt instruction. Nếu output bị markdown wrap, Code node phải strip ```json wrapper. Original Claude prompt được preserve để fair comparison."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract answer text from Claude response\nconst response = $input.first().json;\nlet answer = '';\nif (response.message?.content) answer = response.message.content;\nelse if (response.content) answer = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);\nelse if (response.text) answer = response.text;\nelse throw new Error('Cannot find Claude response');\n\nconst context = $('Code: Build KB Context').first().json;\n\nreturn {\n  json: {\n    answer,\n    asker_email: context.asker_email,\n    asker_name: context.asker_name,\n    original_subject: context.original_subject,\n    thread_id: context.thread_id,\n    message_id: context.message_id,\n    question: context.question,\n    kb_size_chars: context.kb_char_length\n  }\n};"
+      },
+      "id": "code-format-answer",
+      "name": "Code: Format Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $json.message_id }}",
+        "emailType": "html",
+        "message": "=<!DOCTYPE html>\n<html><head><style>\n  body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px; }\n  .answer-box { background: #F0F9FF; border-left: 4px solid #0B3D91; padding: 16px; margin: 12px 0; border-radius: 4px; }\n  .question-quote { background: #F9FAFB; border-left: 3px solid #9CA3AF; padding: 10px 14px; margin: 12px 0; color: #6B7280; font-style: italic; font-size: 13px; }\n  .footer { font-size: 11px; color: #9CA3AF; margin-top: 20px; padding-top: 12px; border-top: 1px solid #E5E7EB; }\n</style></head>\n<body>\n  <p>Chào {{ $json.asker_name }},</p>\n  \n  <div class=\"question-quote\">\n    <strong>Câu hỏi của bạn:</strong><br>\n    {{ $json.question }}\n  </div>\n\n  <div class=\"answer-box\">\n    {{ $json.answer.replace(/\\n/g, '<br>') }}\n  </div>\n\n  <div class=\"footer\">\n    🤖 Trả lời tự động bởi Knowledge Base AI Bot<br>\n    💡 Để hỏi thêm: reply email này hoặc gửi email mới với subject bắt đầu [ASK BOT]<br>\n    📚 KB size: {{ $json.kb_size_chars }} chars · Powered by Claude Sonnet 4.5<br>\n    VTI Academy — AIA-SME-2026 v2.0\n  </div>\n</body></html>",
+        "options": {}
+      },
+      "id": "gmail-reply",
+      "name": "Gmail: Reply with Answer",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2220,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.message_id }}",
+        "labelIds": [
+          "REPLACE_WITH_ANSWERED_LABEL_ID"
+        ]
+      },
+      "id": "gmail-label-answered",
+      "name": "Gmail: Mark as Answered",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2440,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail Personal OAuth2"
+        }
+      },
+      "notes": "Add label '🤖 Bot-Answered' để track. Tạo label trước trong Gmail."
+    }
+  ],
+  "connections": {
+    "Gmail Trigger: [ASK BOT] Subject": {
+      "main": [
+        [
+          {
+            "node": "Set: Extract Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Extract Question": {
+      "main": [
+        [
+          {
+            "node": "Drive: List KB Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive: List KB Files": {
+      "main": [
+        [
+          {
+            "node": "Split: Each KB File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split: Each KB File": {
+      "main": [
+        [
+          {
+            "node": "Drive: Download File Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive: Download File Content": {
+      "main": [
+        [
+          {
+            "node": "Aggregate: All KB Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate: All KB Content": {
+      "main": [
+        [
+          {
+            "node": "Code: Build KB Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build KB Context": {
+      "main": [
+        [
+          {
+            "node": "Gemini: Answer from KB (Chain)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Format Answer": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Reply with Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: Reply with Answer": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Mark as Answered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini: Answer from KB (Chain)": {
+      "main": [
+        [
+          {
+            "node": "Code: Format Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini: Answer from KB": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Gemini: Answer from KB (Chain)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "executionTimeout": 600
+  },
+  "meta": {
+    "templateCreator": "VTI Academy — AIA-SME-2026",
+    "description": "Workflow 4/4: Email-triggered Q&A bot. User gửi email subject [ASK BOT] → fetch KB từ Google Drive folder → Claude answer → reply email. Pattern RAG đơn giản (no vector DB). Buổi 12 upgrade RAG proper."
+  },
+  "tags": [
+    {
+      "name": "VTI-AIA-2026",
+      "createdAt": "2026-04-15T00:00:00.000Z"
+    },
+    {
+      "name": "Buoi-5",
+      "createdAt": "2026-04-15T00:00:00.000Z"
+    },
+    {
+      "name": "Gemini"
+    }
+  ]
+}

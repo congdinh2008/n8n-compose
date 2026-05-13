@@ -1,0 +1,417 @@
+{
+  "name": "Enterprise: Google Form CV Screening with DeepSeek",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "NHAP_FORM_RESPONSE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Form Responses 1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "google-form-trigger",
+      "name": "📥 Google Sheets Trigger: Form Ứng Viên",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        320
+      ],
+      "credentials": {
+        "googleSheetsTriggerOAuth2Api": {
+          "id": "NHAP_GOOGLE_SHEETS_TRIGGER_CREDENTIAL_ID",
+          "name": "Google Sheets Trigger account"
+        }
+      },
+      "notes": "Trigger mỗi khi Google Form có response mới. Form cần có các cột: Họ và tên, Email, Số điện thoại, Vị trí ứng tuyển, CV, JD tuyển dụng (tùy chọn)."
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json;\n\nfunction firstValue(keys, fallback = '') {\n  for (const key of keys) {\n    if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') {\n      return String(row[key]).trim();\n    }\n  }\n  return fallback;\n}\n\nfunction extractDriveFileId(value) {\n  const text = String(value || '');\n  const patterns = [\n    /\\/file\\/d\\/([a-zA-Z0-9_-]+)/,\n    /[?&]id=([a-zA-Z0-9_-]+)/,\n    /open\\?id=([a-zA-Z0-9_-]+)/,\n    /uc\\?id=([a-zA-Z0-9_-]+)/\n  ];\n  for (const pattern of patterns) {\n    const match = text.match(pattern);\n    if (match) return match[1];\n  }\n  const rawId = text.match(/^[a-zA-Z0-9_-]{20,}$/);\n  return rawId ? rawId[0] : '';\n}\n\nconst fullName = firstValue(['Họ và tên', 'Ho va ten', 'Full name', 'Full Name', 'Name', 'Tên ứng viên']);\nconst email = firstValue(['Email', 'Email address', 'Địa chỉ email']);\nconst phone = firstValue(['Số điện thoại', 'So dien thoai', 'Phone', 'Phone number']);\nconst position = firstValue(['Vị trí ứng tuyển', 'Vi tri ung tuyen', 'Position', 'Role'], 'Chưa xác định');\nconst cvUrl = firstValue(['CV', 'File CV', 'CV file', 'Upload CV', 'Tải CV', 'Resume']);\nconst jdFromForm = firstValue(['JD tuyển dụng', 'JD tuyen dung', 'Job Description', 'JD', 'Yêu cầu tuyển dụng']);\nconst source = firstValue(['Nguồn ứng viên', 'Source', 'Kênh ứng tuyển'], 'Google Form');\n\nconst cvFileId = extractDriveFileId(cvUrl);\nif (!fullName || !email || !cvFileId) {\n  throw new Error(`Thiếu dữ liệu bắt buộc. fullName=${fullName}, email=${email}, cvFileId=${cvFileId}. Kiểm tra tên cột Form và link CV.`);\n}\n\nconst jdText = jdFromForm || $vars.RECRUITMENT_JD_TEXT || '';\nif (!jdText) {\n  throw new Error('Thiếu JD tuyển dụng. Điền cột \"JD tuyển dụng\" trong Form hoặc tạo n8n variable RECRUITMENT_JD_TEXT.');\n}\n\nconst candidateId = `CAND-${Date.now()}`;\n\nreturn [{\n  json: {\n    candidate_id: candidateId,\n    full_name: fullName,\n    email,\n    phone,\n    position,\n    cv_url: cvUrl,\n    cv_file_id: cvFileId,\n    source,\n    jd_text: jdText.slice(0, 25000),\n    form_timestamp: firstValue(['Timestamp', 'Dấu thời gian'], ''),\n    received_at: new Date().toISOString(),\n    original_form_row: row\n  }\n}];"
+      },
+      "id": "normalize-form",
+      "name": "⚙️ Chuẩn Hóa Form & Lấy CV File ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        320
+      ],
+      "notes": "Chuẩn hóa response Google Form. Parse Google Drive file ID từ link CV. JD lấy từ cột Form hoặc n8n variable RECRUITMENT_JD_TEXT."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.cv_file_id }}/copy",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  name: 'n8n-cv-text-' + $json.candidate_id + '-' + $json.full_name,\n  mimeType: 'application/vnd.google-apps.document'\n} }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "convert-cv-to-doc",
+      "name": "📄 Drive: Convert CV Sang Google Doc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        320
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "NHAP_GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      },
+      "notes": "Copy/convert file CV PDF/DOCX thành Google Docs để export text/plain. File CV từ Google Form phải nằm trong Drive mà credential có quyền đọc."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.id }}/export?mimeType=text/plain",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 90000
+        }
+      },
+      "id": "export-cv-text",
+      "name": "🧾 Drive: Export CV Text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1080,
+        320
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "NHAP_GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      },
+      "notes": "Export Google Doc đã convert sang text/plain để đưa vào prompt AI."
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst candidate = $('⚙️ Chuẩn Hóa Form & Lấy CV File ID').first().json;\n\nconst cvText = String(raw.body || raw.data || raw.text || raw || '').trim();\nif (!cvText || cvText.length < 50) {\n  throw new Error('Không trích xuất được text từ CV hoặc CV quá ngắn. Kiểm tra file PDF/DOCX và quyền Google Drive.');\n}\n\nconst prompt = `Bạn là Senior Technical Recruiter. Hãy đánh giá ứng viên dựa trên thông tin Google Form, nội dung CV và JD tuyển dụng.\n\nYêu cầu output: chỉ trả JSON hợp lệ, không markdown wrapper, theo schema:\n{\n  \"candidate_name\": \"\",\n  \"position\": \"\",\n  \"overall_score\": 0,\n  \"classification\": \"excellent|good|average|reject\",\n  \"recommendation\": \"shortlist|consider|hold|reject\",\n  \"summary_vi\": \"Tóm tắt 2-3 câu bằng tiếng Việt\",\n  \"strengths\": [\"\"],\n  \"weaknesses\": [\"\"],\n  \"matched_requirements\": [\"\"],\n  \"missing_requirements\": [\"\"],\n  \"risk_flags\": [\"\"],\n  \"suggested_interview_questions\": [\"\"],\n  \"next_step_vi\": \"\",\n  \"reasoning_vi\": \"\"\n}\n\nQuy tắc phân loại:\n- excellent: overall_score >= 85, match rất mạnh với JD, nên ưu tiên liên hệ ngay.\n- good: 70-84, phù hợp phần lớn, nên cân nhắc phỏng vấn.\n- average: 50-69, có tiềm năng nhưng thiếu yêu cầu quan trọng.\n- reject: < 50, không phù hợp JD.\n\nKhông bịa kinh nghiệm không có trong CV. Nếu CV thiếu dữ liệu, ghi vào missing_requirements hoặc risk_flags.\n\n<job_description>\n${candidate.jd_text}\n</job_description>\n\n<form_info>\nCandidate ID: ${candidate.candidate_id}\nName: ${candidate.full_name}\nEmail: ${candidate.email}\nPhone: ${candidate.phone}\nPosition: ${candidate.position}\nSource: ${candidate.source}\n</form_info>\n\n<cv_text>\n${cvText.slice(0, 60000)}\n</cv_text>`;\n\nreturn [{\n  json: {\n    ...candidate,\n    cv_text: cvText.slice(0, 60000),\n    cv_text_chars: Math.min(cvText.length, 60000),\n    cv_text_truncated: cvText.length > 60000,\n    ai_prompt: prompt\n  }\n}];"
+      },
+      "id": "build-ai-prompt",
+      "name": "📝 Tạo Prompt Đánh Giá CV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        320
+      ],
+      "notes": "Ghép JD + thông tin ứng viên + CV text. Yêu cầu DeepSeek trả JSON phân loại ứng viên."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.deepseek.com/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  model: 'deepseek-chat',\n  messages: [\n    {\n      role: 'system',\n      content: 'Bạn là Senior Technical Recruiter. Chỉ trả JSON hợp lệ, không markdown, không thêm text ngoài JSON.'\n    },\n    {\n      role: 'user',\n      content: $json.ai_prompt\n    }\n  ],\n  temperature: 0.2,\n  max_tokens: 4096,\n  response_format: { type: 'json_object' }\n} }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "deepseek-evaluate",
+      "name": "🤖 DeepSeek: Đánh Giá Ứng Viên",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1640,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "NHAP_DEEPSEEK_CREDENTIAL_ID",
+          "name": "DeepSeek API Key"
+        }
+      },
+      "notes": "Credential Header Auth: Name=Authorization, Value=Bearer YOUR_DEEPSEEK_API_KEY."
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst candidate = $('📝 Tạo Prompt Đánh Giá CV').first().json;\n\nlet parsed;\ntry {\n  const text = response.choices?.[0]?.message?.content || '';\n  const clean = text.replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n  parsed = JSON.parse(clean);\n} catch (error) {\n  throw new Error(`Không parse được DeepSeek JSON: ${error.message}. Raw: ${JSON.stringify(response).slice(0, 500)}`);\n}\n\nconst score = Math.max(0, Math.min(100, Number(parsed.overall_score) || 0));\nlet classification = String(parsed.classification || '').toLowerCase();\nif (!['excellent', 'good', 'average', 'reject'].includes(classification)) {\n  classification = score >= 85 ? 'excellent' : score >= 70 ? 'good' : score >= 50 ? 'average' : 'reject';\n}\n\nconst recommendation = parsed.recommendation || (classification === 'excellent' ? 'shortlist' : classification === 'good' ? 'consider' : classification === 'average' ? 'hold' : 'reject');\nconst isExcellent = classification === 'excellent' || score >= 85;\n\nconst row = {\n  'Candidate ID': candidate.candidate_id,\n  'Received At': candidate.received_at,\n  'Name': candidate.full_name,\n  'Email': candidate.email,\n  'Phone': candidate.phone,\n  'Position': candidate.position,\n  'Source': candidate.source,\n  'CV URL': candidate.cv_url,\n  'Score': score,\n  'Classification': classification,\n  'Recommendation': recommendation,\n  'Summary': parsed.summary_vi || '',\n  'Strengths': Array.isArray(parsed.strengths) ? parsed.strengths.join('\\n') : '',\n  'Weaknesses': Array.isArray(parsed.weaknesses) ? parsed.weaknesses.join('\\n') : '',\n  'Matched Requirements': Array.isArray(parsed.matched_requirements) ? parsed.matched_requirements.join('\\n') : '',\n  'Missing Requirements': Array.isArray(parsed.missing_requirements) ? parsed.missing_requirements.join('\\n') : '',\n  'Risk Flags': Array.isArray(parsed.risk_flags) ? parsed.risk_flags.join('\\n') : '',\n  'Interview Questions': Array.isArray(parsed.suggested_interview_questions) ? parsed.suggested_interview_questions.join('\\n') : '',\n  'Next Step': parsed.next_step_vi || '',\n  'Reasoning': parsed.reasoning_vi || '',\n  'AI Raw JSON': JSON.stringify(parsed),\n  'Processed At': new Date().toISOString()\n};\n\nconst telegramMessage = `🌟 <b>ỨNG VIÊN EXCELLENT</b>\n━━━━━━━━━━━━━━━━━━━━\n\n👤 <b>${candidate.full_name}</b>\n🎯 Vị trí: ${candidate.position}\n📊 Score: <b>${score}/100</b>\n📌 Recommendation: <b>${recommendation}</b>\n\n<b>Tóm tắt:</b>\n${parsed.summary_vi || ''}\n\n<b>Điểm mạnh:</b>\n${(parsed.strengths || []).slice(0, 4).map((s, i) => `${i + 1}. ${s}`).join('\\n')}\n\n📧 ${candidate.email}\n📞 ${candidate.phone || '(chưa có)'}\n🔗 CV: ${candidate.cv_url}`;\n\nreturn [{\n  json: {\n    ...candidate,\n    ai_result: parsed,\n    score,\n    classification,\n    recommendation,\n    is_excellent: isExcellent,\n    tracking_row: row,\n    telegram_message: telegramMessage\n  }\n}];"
+      },
+      "id": "parse-ai-result",
+      "name": "🔍 Parse AI Result & Chuẩn Bị Tracking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        320
+      ],
+      "notes": "Parse JSON từ DeepSeek. Chuẩn bị row để append vào Google Sheets và message Telegram cho ứng viên excellent."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "NHAP_TRACKING_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Candidate Tracking",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Candidate ID": "={{ $json.tracking_row['Candidate ID'] }}",
+            "Received At": "={{ $json.tracking_row['Received At'] }}",
+            "Name": "={{ $json.tracking_row['Name'] }}",
+            "Email": "={{ $json.tracking_row['Email'] }}",
+            "Phone": "={{ $json.tracking_row['Phone'] }}",
+            "Position": "={{ $json.tracking_row['Position'] }}",
+            "Source": "={{ $json.tracking_row['Source'] }}",
+            "CV URL": "={{ $json.tracking_row['CV URL'] }}",
+            "Score": "={{ $json.tracking_row['Score'] }}",
+            "Classification": "={{ $json.tracking_row['Classification'] }}",
+            "Recommendation": "={{ $json.tracking_row['Recommendation'] }}",
+            "Summary": "={{ $json.tracking_row['Summary'] }}",
+            "Strengths": "={{ $json.tracking_row['Strengths'] }}",
+            "Weaknesses": "={{ $json.tracking_row['Weaknesses'] }}",
+            "Matched Requirements": "={{ $json.tracking_row['Matched Requirements'] }}",
+            "Missing Requirements": "={{ $json.tracking_row['Missing Requirements'] }}",
+            "Risk Flags": "={{ $json.tracking_row['Risk Flags'] }}",
+            "Interview Questions": "={{ $json.tracking_row['Interview Questions'] }}",
+            "Next Step": "={{ $json.tracking_row['Next Step'] }}",
+            "Reasoning": "={{ $json.tracking_row['Reasoning'] }}",
+            "AI Raw JSON": "={{ $json.tracking_row['AI Raw JSON'] }}",
+            "Processed At": "={{ $json.tracking_row['Processed At'] }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "append-tracking-sheet",
+      "name": "📊 Google Sheets: Lưu Tracking Ứng Viên",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2200,
+        320
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NHAP_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Append phân tích AI vào sheet Candidate Tracking. Cần tạo header đúng như GUIDE.md."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "is-excellent",
+              "leftValue": "={{ $json.is_excellent }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-excellent",
+      "name": "🔀 IF: Excellent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2480,
+        320
+      ],
+      "notes": "Chỉ gửi Telegram khi classification=excellent hoặc score >= 85."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.HR_TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.telegram_message }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "telegram-notify",
+      "name": "📱 Telegram: Báo Ứng Viên Excellent",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2760,
+        200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "NHAP_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "notes": "Gửi thông báo cho HR khi có ứng viên excellent. Tạo n8n variable HR_TELEGRAM_CHAT_ID."
+    }
+  ],
+  "connections": {
+    "📥 Google Sheets Trigger: Form Ứng Viên": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Chuẩn Hóa Form & Lấy CV File ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Chuẩn Hóa Form & Lấy CV File ID": {
+      "main": [
+        [
+          {
+            "node": "📄 Drive: Convert CV Sang Google Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📄 Drive: Convert CV Sang Google Doc": {
+      "main": [
+        [
+          {
+            "node": "🧾 Drive: Export CV Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧾 Drive: Export CV Text": {
+      "main": [
+        [
+          {
+            "node": "📝 Tạo Prompt Đánh Giá CV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Tạo Prompt Đánh Giá CV": {
+      "main": [
+        [
+          {
+            "node": "🤖 DeepSeek: Đánh Giá Ứng Viên",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 DeepSeek: Đánh Giá Ứng Viên": {
+      "main": [
+        [
+          {
+            "node": "🔍 Parse AI Result & Chuẩn Bị Tracking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Parse AI Result & Chuẩn Bị Tracking": {
+      "main": [
+        [
+          {
+            "node": "📊 Google Sheets: Lưu Tracking Ứng Viên",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔀 IF: Excellent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 IF: Excellent?": {
+      "main": [
+        [
+          {
+            "node": "📱 Telegram: Báo Ứng Viên Excellent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "executionTimeout": 300
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "Google Form candidate intake with CV upload -> Google Drive text extraction -> DeepSeek screening against JD -> Google Sheets tracking -> Telegram alert for excellent candidates."
+  },
+  "id": "wf-enterprise-candidate-cv-screening-deepseek",
+  "tags": [
+    {
+      "name": "enterprise"
+    },
+    {
+      "name": "hr"
+    },
+    {
+      "name": "recruitment"
+    },
+    {
+      "name": "deepseek"
+    },
+    {
+      "name": "community"
+    }
+  ]
+}

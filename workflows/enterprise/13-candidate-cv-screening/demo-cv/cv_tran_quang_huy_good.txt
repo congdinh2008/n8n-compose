@@ -1,0 +1,30 @@
+Tran Quang Huy
+Frontend Developer
+Email: quang.huy@example.com
+Phone: 0902002002
+Location: Da Nang
+
+Summary
+Frontend developer with 3.5 years of experience creating business web applications. Comfortable with React, TypeScript, REST API integration, responsive UI, and teamwork with product owners.
+
+Experience
+Frontend Developer, FinOps Platform, 2022-2026
+- Built internal finance management screens using React, TypeScript, Zustand, and Ant Design.
+- Integrated REST APIs for transaction lists, approval workflows, and user permissions.
+- Implemented form validation, loading states, empty states, and error handling.
+- Collaborated with backend developers to define API contracts.
+- Wrote unit tests for utility functions and selected UI components with Jest.
+
+Junior Frontend Developer, Web Agency, 2020-2022
+- Created landing pages and admin pages using React, JavaScript, HTML, CSS.
+- Converted Figma designs to responsive layouts.
+- Fixed cross-browser UI bugs and supported SEO updates.
+
+Skills
+React, TypeScript, JavaScript, Zustand, REST API, HTML, CSS, Ant Design, Tailwind CSS, Jest, Git.
+
+Education
+Bachelor of Information Technology, Duy Tan University.
+
+Languages
+Vietnamese native, English reading and writing intermediate.

@@ -1,0 +1,31 @@
+Nguyen Minh Anh
+Frontend Lead / Senior React Developer
+Email: minh.anh@example.com
+Phone: 0901001001
+Location: Ho Chi Minh City
+
+Summary
+Frontend engineer with 6 years of experience building SaaS dashboards, CRM portals, and ecommerce applications. Strong in React, TypeScript, Next.js, design systems, performance optimization, and mentoring junior engineers.
+
+Experience
+Senior Frontend Developer, CloudCRM Vietnam, 2021-2026
+- Built a multi-tenant CRM dashboard using React 18, TypeScript, Redux Toolkit, React Query, and Vite.
+- Implemented reusable component library with accessibility checks, responsive layouts, and Storybook documentation.
+- Improved dashboard initial load time by 42% using code splitting, memoization, and bundle analysis.
+- Integrated REST APIs for lead management, pipeline analytics, billing, and role-based access control.
+- Added Playwright E2E tests for core sales workflows and React Testing Library tests for shared components.
+- Reviewed pull requests and mentored 4 junior frontend developers.
+
+Frontend Developer, ShopNow, 2018-2021
+- Developed ecommerce checkout and product listing pages with React and JavaScript ES6.
+- Worked with product managers and designers to refine UI requirements and edge cases.
+- Integrated authentication, payment status, error states, and loading states.
+
+Skills
+React, TypeScript, JavaScript, Next.js, Redux Toolkit, Zustand, React Query, REST API, HTML, CSS, Tailwind CSS, Accessibility, Jest, React Testing Library, Playwright, Performance Optimization, Git, Agile.
+
+Education
+Bachelor of Software Engineering, University of Information Technology.
+
+Languages
+Vietnamese native, English professional working proficiency.

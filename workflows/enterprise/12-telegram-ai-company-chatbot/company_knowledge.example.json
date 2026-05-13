@@ -1,0 +1,75 @@
+{
+  "company": {
+    "name": "Cong Ty ABC",
+    "tone": "than thien, ro rang, chuyen nghiep",
+    "support_hours": "08:30-17:30, Thu 2 den Thu 6",
+    "handoff_contact": "support@example.com"
+  },
+  "workflows": [
+    {
+      "name": "Tu van san pham",
+      "steps": [
+        "Xac dinh nhu cau cua khach hang",
+        "Goi y san pham phu hop tu danh sach san pham",
+        "Neu khach can bao gia, xin so luong va thong tin lien he",
+        "Neu cau hoi vuot ngoai du lieu, chuyen ve nhan vien tu van"
+      ]
+    },
+    {
+      "name": "Xu ly bao hanh",
+      "steps": [
+        "Xin ma don hang hoac so dien thoai mua hang",
+        "Kiem tra san pham con trong thoi gian bao hanh hay khong",
+        "Huong dan khach gui anh/video loi",
+        "Tao yeu cau bao hanh cho bo phan ky thuat"
+      ]
+    }
+  ],
+  "products": [
+    {
+      "sku": "ABC-CRM-BASIC",
+      "name": "ABC CRM Basic",
+      "category": "CRM",
+      "price": "1.500.000 VND/thang",
+      "description": "Quan ly khach hang, pipeline ban hang va lich hen cho team nho.",
+      "best_for": "Doanh nghiep 5-20 nhan su",
+      "features": [
+        "Quan ly lead va khach hang",
+        "Pipeline ban hang",
+        "Bao cao doanh so co ban"
+      ]
+    },
+    {
+      "sku": "ABC-CRM-PRO",
+      "name": "ABC CRM Pro",
+      "category": "CRM",
+      "price": "4.500.000 VND/thang",
+      "description": "CRM nang cao co automation, tich hop email va bao cao quan tri.",
+      "best_for": "Doanh nghiep 20-100 nhan su",
+      "features": [
+        "Automation cham soc khach hang",
+        "Tich hop Gmail/Telegram",
+        "Bao cao doanh thu theo nhom"
+      ]
+    }
+  ],
+  "faq": [
+    {
+      "question": "Co dung thu khong?",
+      "answer": "Co. Khach hang co the dung thu 14 ngay voi ban Basic."
+    },
+    {
+      "question": "Co ho tro cai dat khong?",
+      "answer": "Co. Goi Pro bao gom 2 buoi onboarding online."
+    }
+  ],
+  "policies": {
+    "refund": "Hoan tien trong 7 ngay neu chua su dung qua 20% quota thang.",
+    "warranty": "Ho tro ky thuat trong suot thoi gian con goi dich vu.",
+    "do_not_answer": [
+      "Thong tin phap ly chua duoc cong ty phe duyet",
+      "Gia tuy chinh chua co trong file JSON",
+      "Cam ket chiet khau ngoai chinh sach"
+    ]
+  }
+}
