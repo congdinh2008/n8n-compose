@@ -1,0 +1,408 @@
+{
+  "name": "WF05 [Gemini] - Telegram AI Idea Synthesizer v1.0",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger: New Message",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "telegram-idea-bot-webhook",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "notes": "Trigger khi bot nhận tin nhắn mới từ Telegram. Yêu cầu: Bot phải được set webhook qua BotFather. Chỉ nhận loại update = 'message'."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "user_message",
+              "value": "={{ $json.message?.text || '' }}"
+            },
+            {
+              "name": "chat_id",
+              "value": "={{ $json.message?.chat?.id?.toString() || '' }}"
+            },
+            {
+              "name": "user_name",
+              "value": "={{ ($json.message?.from?.first_name || '') + ' ' + ($json.message?.from?.last_name || '') }}"
+            },
+            {
+              "name": "username",
+              "value": "={{ $json.message?.from?.username || 'unknown' }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $json.message?.message_id?.toString() || '' }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss') }}"
+            },
+            {
+              "name": "date_only",
+              "value": "={{ $now.setZone('Asia/Ho_Chi_Minh').toFormat('dd/MM/yyyy') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-extract-message",
+      "name": "Set: Extract Message Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 300],
+      "notes": "Extract các trường cần thiết từ Telegram update. user_message = nội dung tin nhắn chính."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.user_message }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "if-has-text",
+      "name": "IF: Has Text Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "notes": "Chỉ xử lý tin nhắn có text. Bỏ qua ảnh, file, sticker, v.v."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "⏳ *Đang phân tích ý tưởng của bạn...*\n\nAI đang tổng hợp và đưa ra giải pháp, vui lòng chờ giây lát 🤖",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_to_message_id": "={{ parseInt($json.message_id) }}"
+        }
+      },
+      "id": "telegram-typing-ack",
+      "name": "Telegram: Send Processing Ack",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [900, 220],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "notes": "Gửi thông báo 'đang xử lý' ngay lập tức để user không phải chờ im lặng. UX tốt hơn."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Bạn là AI assistant chuyên tổng hợp ý tưởng và đề xuất giải pháp thực tế.\n\nNgười dùng vừa chia sẻ ý tưởng sau:\n<user_idea>\n{{ $('Set: Extract Message Data').first().json.user_message }}\n</user_idea>\n\nHãy phân tích và trả về đúng định dạng JSON sau (KHÔNG có markdown wrapper):\n{\n  \"category\": \"<loại ý tưởng: Kinh doanh | Công nghệ | Cá nhân | Sáng tạo | Khác>\",\n  \"summary\": \"<tóm tắt ý tưởng trong 1-2 câu ngắn gọn>\",\n  \"key_points\": \"<3 điểm nổi bật của ý tưởng, ngăn cách bằng |>\",\n  \"suggestions\": \"<3-5 đề xuất cụ thể để thực hiện ý tưởng này, ngăn cách bằng |>\",\n  \"risks\": \"<2-3 rủi ro/thách thức cần lưu ý, ngăn cách bằng |>\",\n  \"next_steps\": \"<3 bước hành động tiếp theo có thể làm ngay, ngăn cách bằng |>\",\n  \"rating\": \"<đánh giá tiềm năng: 1-10>\",\n  \"telegram_reply\": \"<tin nhắn trả lời ngắn gọn, thân thiện gửi về Telegram (max 500 ký tự, dùng emoji, có thể dùng MarkdownV2)>\"\n}\n\nQuy tắc:\n1. CHỈ trả về JSON thuần, không có ```json wrapper\n2. Ngôn ngữ: tiếng Việt\n3. telegram_reply phải súc tích, có emoji, dễ đọc trên mobile\n4. suggestions và next_steps phải thực tế, có thể áp dụng được ngay",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "llm-chain-gemini",
+      "name": "Gemini: Analyze Idea (Chain)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [1120, 220],
+      "notes": "Basic LLM Chain sử dụng Gemini để phân tích ý tưởng. Output: JSON string trong $json.text."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {
+          "maxOutputTokens": 2048,
+          "temperature": 0.4
+        }
+      },
+      "id": "gemini-model",
+      "name": "Gemini: Flash Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [1120, 440],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "REPLACE_WITH_YOUR_GEMINI_CREDENTIAL_ID",
+          "name": "Google Gemini - Class Shared"
+        }
+      },
+      "notes": "Dùng gemini-2.0-flash cho tốc độ nhanh và chi phí thấp. Có thể đổi sang gemini-1.5-pro nếu cần chất lượng cao hơn."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse JSON response từ Gemini\nconst rawText = $input.first().json.text || '';\n\n// Strip markdown code blocks nếu có\nlet cleanText = rawText.trim();\nif (cleanText.startsWith('```json')) {\n  cleanText = cleanText.replace(/^```json\\n?/, '').replace(/\\n?```$/, '');\n} else if (cleanText.startsWith('```')) {\n  cleanText = cleanText.replace(/^```\\n?/, '').replace(/\\n?```$/, '');\n}\n\nlet parsed = {};\ntry {\n  parsed = JSON.parse(cleanText);\n} catch (e) {\n  // Fallback nếu parse lỗi\n  parsed = {\n    category: 'Khác',\n    summary: rawText.substring(0, 200),\n    key_points: 'Không phân tích được|Vui lòng thử lại|',\n    suggestions: 'Hãy mô tả ý tưởng rõ hơn|',\n    risks: 'Không xác định|',\n    next_steps: 'Mô tả chi tiết hơn rồi gửi lại|',\n    rating: '5',\n    telegram_reply: '⚠️ AI gặp lỗi khi phân tích. Hãy thử mô tả ý tưởng rõ ràng hơn nhé!'\n  };\n}\n\n// Lấy context từ Set node\nconst ctx = $('Set: Extract Message Data').first().json;\n\nreturn {\n  json: {\n    ...parsed,\n    user_message: ctx.user_message,\n    user_name: ctx.user_name.trim() || ctx.username,\n    username: ctx.username,\n    chat_id: ctx.chat_id,\n    message_id: ctx.message_id,\n    timestamp: ctx.timestamp,\n    date_only: ctx.date_only,\n    // Chuẩn hoá rating\n    rating: parseInt(parsed.rating) || 5\n  }\n};"
+      },
+      "id": "code-parse-ai-response",
+      "name": "Code: Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 220],
+      "notes": "Parse JSON từ Gemini, handle lỗi parse, merge với context user. Output chuẩn hoá cho các node phía sau."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Ideas Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.timestamp }}",
+            "Date": "={{ $json.date_only }}",
+            "Username": "={{ $json.username }}",
+            "User Name": "={{ $json.user_name }}",
+            "Original Idea": "={{ $json.user_message }}",
+            "Category": "={{ $json.category }}",
+            "Summary": "={{ $json.summary }}",
+            "Key Points": "={{ $json.key_points }}",
+            "Suggestions": "={{ $json.suggestions }}",
+            "Risks": "={{ $json.risks }}",
+            "Next Steps": "={{ $json.next_steps }}",
+            "AI Rating": "={{ $json.rating }}",
+            "Status": "New"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "sheets-log-idea",
+      "name": "Sheets: Log Idea to Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1560, 220],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GSHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets Personal"
+        }
+      },
+      "notes": "Ghi ý tưởng + phân tích AI vào Google Sheet. Sheet phải có đúng tên cột như mapping ở trên. ⚠️ REPLACE document ID với Sheet ID của bạn."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.telegram_reply }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_to_message_id": "={{ parseInt($json.message_id) }}"
+        }
+      },
+      "id": "telegram-send-analysis",
+      "name": "Telegram: Send AI Analysis",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1780, 220],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "notes": "Gửi kết quả phân tích từ AI về Telegram. Sử dụng telegram_reply field đã được AI tạo sẵn."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ '📊 *Chi tiết phân tích đã được lưu vào Google Sheets!*\\n\\n' + '📁 *Danh mục:* ' + $json.category + '\\n' + '⭐ *Điểm tiềm năng:* ' + $json.rating + '/10\\n\\n' + '🔑 *Điểm nổi bật:*\\n' + ($json.key_points || '').split('|').filter(s => s.trim()).map((p, i) => '  ' + (i+1) + '. ' + p.trim()).join('\\n') + '\\n\\n' + '💡 *Bước hành động tiếp theo:*\\n' + ($json.next_steps || '').split('|').filter(s => s.trim()).map((s, i) => '  ' + (i+1) + '. ' + s.trim()).join('\\n') + '\\n\\n' + '✅ _Ý tưởng đã được lưu lại để theo dõi!_' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-send-detail",
+      "name": "Telegram: Send Full Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2000, 220],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "notes": "Gửi tin nhắn thứ 2 với chi tiết đầy đủ: điểm rating, key points, next steps. Giúp user thấy giá trị ngay."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Set: Extract Message Data').first().json.chat_id }}",
+        "text": "⚠️ Tin nhắn của bạn không có nội dung text. Hãy gửi ý tưởng dưới dạng văn bản nhé! 💬",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-no-text-reply",
+      "name": "Telegram: Reply No Text Warning",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [900, 440],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "notes": "Branch xử lý khi tin nhắn không có text (ảnh, sticker, file, v.v.)."
+    }
+  ],
+  "connections": {
+    "Telegram Trigger: New Message": {
+      "main": [
+        [
+          {
+            "node": "Set: Extract Message Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Extract Message Data": {
+      "main": [
+        [
+          {
+            "node": "IF: Has Text Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Has Text Message": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Send Processing Ack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: Reply No Text Warning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: Send Processing Ack": {
+      "main": [
+        [
+          {
+            "node": "Gemini: Analyze Idea (Chain)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini: Analyze Idea (Chain)": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini: Flash Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Gemini: Analyze Idea (Chain)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Log Idea to Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Log Idea to Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Send AI Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: Send AI Analysis": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Send Full Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "executionTimeout": 120
+  },
+  "meta": {
+    "templateCreator": "VTI Academy — AIA-SME-2026",
+    "description": "WF05: Telegram AI chatbot tổng hợp ý tưởng hàng ngày. User gửi ý tưởng qua Telegram → Gemini phân tích (category, summary, suggestions, risks, next steps) → Lưu Google Sheets → Gửi tóm tắt + chi tiết về Telegram. Pattern: Telegram Trigger → IF → LLM Chain → Sheets → Telegram Reply."
+  },
+  "tags": [
+    {
+      "name": "VTI-AIA-2026",
+      "createdAt": "2026-05-13T00:00:00.000Z"
+    },
+    {
+      "name": "Buoi-6",
+      "createdAt": "2026-05-13T00:00:00.000Z"
+    },
+    {
+      "name": "Telegram",
+      "createdAt": "2026-05-13T00:00:00.000Z"
+    },
+    {
+      "name": "Gemini",
+      "createdAt": "2026-05-13T00:00:00.000Z"
+    }
+  ]
+}
