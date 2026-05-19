@@ -1,0 +1,368 @@
+{
+  "name": "Personal: Meeting Notes AI",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "everyHour",
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (Hourly)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "notes": "⚙️ Cấu hình: Kiểm tra mỗi giờ trong giờ làm việc. Có thể giới hạn 8 AM - 6 PM bằng Code node."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if current time is within work hours (8 AM - 6 PM)\nconst now = new Date();\nconst vietnamTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));\nconst hour = vietnamTime.getHours();\n\nconst isWorkHours = hour >= 8 && hour <= 18;\n\nreturn [{\n  json: {\n    is_work_hours: isWorkHours,\n    current_hour: hour,\n    check_time: vietnamTime.toISOString(),\n    timezone: 'Asia/Ho_Chi_Minh',\n    one_hour_ago: new Date(vietnamTime.getTime() - 3600000).toISOString()\n  }\n}];"
+      },
+      "id": "check-work-hours",
+      "name": "Check Work Hours",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Chỉ xử lý trong giờ làm việc (8 AM - 6 PM) để tránh chạy lúc đêm."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "work-hours-check",
+              "leftValue": "={{ $json.is_work_hours }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-work-hours",
+      "name": "IF: Work Hours?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Nếu trong giờ làm việc → tiếp tục. Nếu không → dừng."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mock data: Get meetings from Google Calendar\n// TODO: Thay thế bằng Google Calendar node thật\n// Google Calendar API: GET https://www.googleapis.com/calendar/v3/calendars/primary/events\n\nconst now = new Date();\nconst oneHourAgo = new Date(now.getTime() - 3600000);\n\n// Mock meetings - thay thế bằng data từ Google Calendar API\nconst completedMeetings = [\n  {\n    id: 'meeting_001',\n    summary: 'Team Standup',\n    attendees: ['user@company.com', 'teammate@company.com'],\n    start: oneHourAgo.toISOString(),\n    end: new Date(oneHourAgo.getTime() + 1800000).toISOString(),\n    has_recording: false,\n    recording_url: '',\n    conference_data: null\n  }\n];\n\nconsole.log(`Found ${completedMeetings.length} recently completed meetings`);\n\nreturn completedMeetings.map(meeting => ({\n  json: {\n    ...meeting,\n    check_time: now.toISOString()\n  }\n}));"
+      },
+      "id": "get-completed-meetings",
+      "name": "Get Completed Meetings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 150],
+      "notes": "⚠️ TODO: Dùng Google Calendar node để lấy meetings kết thúc trong 1 giờ qua. Hiện tại dùng mock data."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-recording",
+              "leftValue": "={{ $json.has_recording }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-recording",
+      "name": "IF: Has Recording?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1250, 150],
+      "notes": "Nếu có recording → transcribe & summarize. Nếu không → gửi reminder."
+    },
+    {
+      "parameters": {
+        "authentication": "headerAuth",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"file\": \"@recording.mp3\",\n  \"model\": \"whisper-1\"\n}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "transcribe-recording",
+      "name": "Transcribe Recording (OpenAI Whisper)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 50],
+      "notes": "⚠️ Cần OpenAI API key. Download recording trước rồi gửi lên Whisper API. Cost: ~$0.006/phút."
+    },
+    {
+      "parameters": {
+        "authentication": "headerAuth",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openAiApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Bạn là trợ lý ghi chú cuộc họp. Hãy tóm tắt transcript và trích xuất action items.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Tóm tắt cuộc họp sau và liệt kê action items:\\n\\n{{ $json.transcript }}\\n\\nTrả về format:\\n## Tóm tắt\\n[2-3 câu]\\n\\n## Action Items\\n- [ ] Item 1 (Người phụ trách: ...)\\n- [ ] Item 2\\n\\n## Quyết định chính\\n- Decision 1\\n- Decision 2\"\n    }\n  ]\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "summarize-meeting",
+      "name": "Summarize Meeting (OpenAI GPT)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1750, 50],
+      "notes": "⚠️ Cần OpenAI API key. Gửi transcript để GPT tóm tắt và extract action items."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format meeting notes email\nconst meeting = $input.all().find(m => m.json.id)?.json || {};\nconst summary = $('Summarize Meeting (OpenAI GPT)').first()?.json?.choices?.[0]?.message?.content || 'Không có tóm tắt';\n\nconst email = {\n  to: meeting.attendees?.join(', ') || '',\n  subject: `📝 Meeting Notes: ${meeting.summary || 'Cuộc họp'}`,\n  body: `Kính gửi mọi người,\\n\\nĐây là tóm tắt cuộc họp vừa kết thúc:\\n\\n━━━━━━━━━━━━━━━━━━━━\\n📋 ${meeting.summary || 'Cuộc họp'}\\n━━━━━━━━━━━━━━━━━━━━\\n\\n⏰ Thời gian: ${new Date(meeting.start).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}\\n👥 Người tham dự: ${meeting.attendees?.join(', ') || 'N/A'}\\n\\n━━━━━━━━━━━━━━━━━━━━\\n📝 TÓM TẮT\\n━━━━━━━━━━━━━━━━━━━━\\n\\n${summary}\\n\\n━━━━━━━━━━━━━━━━━━━━\\n\\nTrân trọng,\\nAI Meeting Assistant`,\n  meeting_id: meeting.id,\n  summary_text: summary\n};\n\nreturn [{ json: email }];"
+      },
+      "id": "format-notes-email",
+      "name": "Format Notes Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 50],
+      "notes": "Tạo email tóm tắt cuộc họp với action items. Gửi cho tất cả attendees."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "send-notes-email",
+      "name": "Send Notes Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2250, 50],
+      "notes": "⚠️ Gửi email meeting notes cho attendees. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "meeting_id": "={{ $json.meeting_id || $('Get Completed Meetings').first().json.id }}",
+            "meeting_name": "={{ $('Get Completed Meetings').first().json.summary }}",
+            "date": "={{ new Date().toISOString().split('T')[0] }}",
+            "attendees": "={{ $('Get Completed Meetings').first().json.attendees?.join(', ') }}",
+            "has_notes": "={{ $json.summary_text ? 'Yes' : 'No' }}",
+            "notes_sent_at": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-meeting",
+      "name": "Log to Meeting Tracker Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [2250, 300],
+      "notes": "⚠️ Log meeting vào Google Sheets tracking. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "⏰ Reminder: Add meeting notes for {{ $('Get Completed Meetings').first().json.summary }}",
+        "message": "=Chào bạn,\\n\\n⏰ Reminder: Cuộc họp \"{{ $('Get Completed Meetings').first().json.summary }}\" đã kết thúc nhưng chưa có recording.\\n\\nVui lòng:\\n1. Thêm meeting notes vào Google Docs/Notion\\n2. Hoặc upload recording nếu có\\n3. Gửi notes cho attendees\\n\\nCảm ơn!",
+        "options": {}
+      },
+      "id": "send-reminder",
+      "name": "Send Reminder (No Recording)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1500, 450],
+      "notes": "⚠️ Gửi reminder khi không có recording. Cần Gmail OAuth."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Hourly)": {
+      "main": [
+        [
+          {
+            "node": "Check Work Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Work Hours": {
+      "main": [
+        [
+          {
+            "node": "IF: Work Hours?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Work Hours?": {
+      "main": [
+        [
+          {
+            "node": "Get Completed Meetings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Completed Meetings": {
+      "main": [
+        [
+          {
+            "node": "IF: Has Recording?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Has Recording?": {
+      "main": [
+        [
+          {
+            "node": "Transcribe Recording (OpenAI Whisper)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Reminder (No Recording)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe Recording (OpenAI Whisper)": {
+      "main": [
+        [
+          {
+            "node": "Summarize Meeting (OpenAI GPT)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Meeting (OpenAI GPT)": {
+      "main": [
+        [
+          {
+            "node": "Format Notes Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Notes Email": {
+      "main": [
+        [
+          {
+            "node": "Send Notes Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Notes Email": {
+      "main": [
+        [
+          {
+            "node": "Log to Meeting Tracker Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reminder (No Recording)": {
+      "main": [
+        [
+          {
+            "node": "Log to Meeting Tracker Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["personal", "meetings", "notes", "AI", "transcription", "summary"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "personal-workflow"
+  }
+}
