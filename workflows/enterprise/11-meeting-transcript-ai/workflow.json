@@ -1,0 +1,492 @@
+{
+  "name": "Enterprise: Meeting Transcript → AI Meeting Minutes",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meeting-transcript",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "📥 Webhook: Nhận Transcript",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "meeting-transcript-ai-v1",
+      "notes": "POST tới: {n8n_url}/webhook/meeting-transcript\n\nBody JSON:\n{\n  meeting_title: string,\n  meeting_date: YYYY-MM-DD,\n  attendees: [email1, email2],\n  attendee_names: [name1, name2],\n  transcript: string (min 50 ký tự),\n  ai_model: 'gemini' | 'deepseek',\n  organizer_email: string,\n  notification_chat_id: string (Telegram Chat ID),\n  sheet_id: string (Google Sheet ID)\n}"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate và chuẩn hóa input từ webhook\nconst body = $input.first().json.body || $input.first().json;\n\n// Kiểm tra transcript bắt buộc\nif (!body.transcript || String(body.transcript).trim().length < 50) {\n  throw new Error('❌ Transcript không hợp lệ hoặc quá ngắn (tối thiểu 50 ký tự)');\n}\n\n// Chuẩn hóa ai_model\nconst ai_model = (body.ai_model || 'gemini').toLowerCase();\nif (!['gemini', 'deepseek'].includes(ai_model)) {\n  throw new Error('❌ ai_model phải là \"gemini\" hoặc \"deepseek\"');\n}\n\n// Xử lý danh sách attendees\nconst attendees = Array.isArray(body.attendees)\n  ? body.attendees.filter(Boolean)\n  : (body.attendees ? String(body.attendees).split(',').map(e => e.trim()).filter(Boolean) : []);\n\nconst attendeeNames = Array.isArray(body.attendee_names)\n  ? body.attendee_names.filter(Boolean)\n  : (body.attendee_names ? String(body.attendee_names).split(',').map(n => n.trim()).filter(Boolean) : attendees);\n\n// Format ngày họp\nconst meetingDate = body.meeting_date || new Date().toISOString().split('T')[0];\n\n// Tạo Request ID duy nhất\nconst requestId = `MTG-${Date.now()}`;\n\nreturn [{\n  json: {\n    meeting_title: body.meeting_title || 'Cuộc Họp Không Tên',\n    meeting_date: meetingDate,\n    attendees: attendees,\n    attendee_names: attendeeNames,\n    attendees_count: attendees.length,\n    transcript: String(body.transcript).trim(),\n    transcript_length: String(body.transcript).trim().length,\n    ai_model: ai_model,\n    organizer_email: body.organizer_email || '',\n    notification_chat_id: String(body.notification_chat_id || ''),\n    sheet_id: body.sheet_id || 'NHẬP_GOOGLE_SHEET_ID',\n    request_id: requestId,\n    received_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "validate-input",
+      "name": "⚙️ Validate & Chuẩn Bị Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [530, 300],
+      "notes": "Validate dữ liệu đầu vào:\n- Kiểm tra transcript tối thiểu 50 ký tự\n- Chuẩn hóa ai_model (gemini/deepseek)\n- Parse attendees list\n- Tạo Request ID duy nhất"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\n// Format ngày họp theo tiếng Việt\nconst dateObj = new Date(data.meeting_date + 'T00:00:00+07:00');\nconst formattedDate = dateObj.toLocaleDateString('vi-VN', {\n  weekday: 'long',\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric',\n  timeZone: 'Asia/Ho_Chi_Minh'\n});\n\nconst attendeeList = data.attendee_names.length > 0\n  ? data.attendee_names.join(', ')\n  : 'Không xác định';\n\n// Xây dựng prompt phân tích transcript\nconst prompt = `Bạn là chuyên gia phân tích và tổng hợp biên bản cuộc họp (Meeting Minutes) chuyên nghiệp.\n\nHãy phân tích transcript cuộc họp dưới đây và tạo biên bản cuộc họp đầy đủ, chuẩn xác.\n\n## THÔNG TIN CUỘC HỌP:\n- Tên cuộc họp: ${data.meeting_title}\n- Ngày tổ chức: ${formattedDate}\n- Người tham dự (${data.attendees_count} người): ${attendeeList}\n\n## NỘI DUNG TRANSCRIPT:\n${data.transcript}\n\n## YÊU CẦU OUTPUT:\nTrả về JSON hợp lệ với cấu trúc sau (KHÔNG có markdown wrapper):\n{\n  \"meeting_summary\": \"Tóm tắt tổng quan cuộc họp trong 2-3 câu súc tích\",\n  \"key_topics\": [\n    {\n      \"topic\": \"Tên chủ đề thảo luận\",\n      \"summary\": \"Tóm tắt nội dung thảo luận\",\n      \"outcome\": \"Kết quả hoặc quyết định đạt được\"\n    }\n  ],\n  \"key_decisions\": [\n    {\n      \"decision\": \"Quyết định cụ thể được đưa ra\",\n      \"owner\": \"Người chịu trách nhiệm thực hiện\",\n      \"rationale\": \"Lý do/bối cảnh dẫn đến quyết định\"\n    }\n  ],\n  \"action_items\": [\n    {\n      \"task\": \"Mô tả công việc cụ thể cần làm\",\n      \"owner\": \"Người thực hiện\",\n      \"deadline\": \"Thời hạn hoàn thành (YYYY-MM-DD hoặc mô tả)\",\n      \"priority\": \"high|medium|low\",\n      \"notes\": \"Ghi chú bổ sung nếu có\"\n    }\n  ],\n  \"next_steps\": \"Mô tả các bước tiếp theo sau cuộc họp này\",\n  \"next_meeting\": {\n    \"suggested_date\": \"Ngày đề xuất hoặc mô tả thời gian họp tiếp\",\n    \"agenda_preview\": \"Dự kiến nội dung agenda lần họp tiếp theo\"\n  },\n  \"meeting_effectiveness_score\": 8,\n  \"improvement_suggestions\": \"Gợi ý để cải thiện chất lượng cuộc họp lần sau\"\n}\n\nQUAN TRỌNG:\n- Chỉ sử dụng thông tin có trong transcript, KHÔNG tự sáng tạo\n- Nếu không có thông tin cho trường nào, để giá trị rỗng \"\"\n- Viết tiếng Việt cho toàn bộ nội dung\n- Output PHẢI là JSON thuần túy, không có text hay markdown thêm vào`;\n\nreturn [{\n  json: {\n    ...data,\n    formatted_date: formattedDate,\n    prompt: prompt\n  }\n}];"
+      },
+      "id": "build-prompt",
+      "name": "📝 Tạo AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [810, 300],
+      "notes": "Xây dựng prompt chi tiết yêu cầu AI:\n- Format ngày tiếng Việt\n- Yêu cầu JSON output có schema cụ thể\n- Meeting Minutes gồm: summary, topics, decisions, action items, next steps"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "ai-model-check",
+              "leftValue": "={{ $json.ai_model }}",
+              "rightValue": "gemini",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-ai-model",
+      "name": "🔀 IF: Dùng Gemini?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1090, 300],
+      "notes": "TRUE (output 0) → Gemini 2.0 Flash\nFALSE (output 1) → DeepSeek Chat\n\nChọn AI model dựa trên trường ai_model trong request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\n  return {\n    contents: [{\n      parts: [{ text: $json.prompt }]\n    }],\n    safetySettings: [\n      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },\n      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },\n      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },\n      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }\n    ],\n    generationConfig: {\n      temperature: 0.3,\n      maxOutputTokens: 8192,\n      responseMimeType: 'application/json'\n    }\n  };\n})() }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "gemini-api-call",
+      "name": "🤖 Gemini: Phân Tích Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1370, 150],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "NHẬP_GEMINI_CREDENTIAL_ID",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      },
+      "notes": "⚙️ Cài credential:\nSettings → Credentials → Add\n→ Google Gemini(PaLM) API\n→ Nhập API Key từ aistudio.google.com\n\nModel: gemini-2.0-flash (nhanh, rẻ)\nTimeout: 90s (transcript dài)\nOutput: JSON (responseMimeType)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.deepseek.com/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\n  return {\n    model: 'deepseek-chat',\n    messages: [\n      {\n        role: 'system',\n        content: 'Bạn là chuyên gia phân tích biên bản cuộc họp. Chỉ trả về JSON hợp lệ, không có markdown wrapper hay text bổ sung.'\n      },\n      {\n        role: 'user',\n        content: $json.prompt\n      }\n    ],\n    temperature: 0.3,\n    max_tokens: 8192,\n    response_format: { type: 'json_object' }\n  };\n})() }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "deepseek-api-call",
+      "name": "🤖 DeepSeek: Phân Tích Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1370, 450],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "NHẬP_DEEPSEEK_CREDENTIAL_ID",
+          "name": "DeepSeek API Key"
+        }
+      },
+      "notes": "⚙️ Cài credential:\nSettings → Credentials → Add\n→ Header Auth\n→ Name: Authorization\n→ Value: Bearer YOUR_DEEPSEEK_API_KEY\n(Lấy key từ platform.deepseek.com)\n\nAPI tương thích OpenAI format\nresponse_format: json_object đảm bảo output JSON"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response (hỗ trợ cả Gemini và DeepSeek format)\nconst aiResponse = $input.first().json;\nlet meetingMinutes;\n\ntry {\n  // Format 1: Google Gemini API response\n  if (aiResponse.candidates && aiResponse.candidates[0]) {\n    const text = aiResponse.candidates[0]?.content?.parts?.[0]?.text;\n    if (!text) throw new Error('Gemini response trống');\n    meetingMinutes = JSON.parse(text);\n  }\n  // Format 2: DeepSeek / OpenAI-compatible response\n  else if (aiResponse.choices && aiResponse.choices[0]) {\n    const text = aiResponse.choices[0]?.message?.content;\n    if (!text) throw new Error('DeepSeek response trống');\n    // Loại bỏ markdown wrapper nếu có\n    const cleanText = text.replace(/^```json\\s*/m, '').replace(/```\\s*$/m, '').trim();\n    meetingMinutes = JSON.parse(cleanText);\n  }\n  else {\n    throw new Error(`Không nhận được response hợp lệ từ AI. Keys: ${Object.keys(aiResponse).join(', ')}`);\n  }\n} catch(e) {\n  const raw = JSON.stringify(aiResponse).substring(0, 300);\n  throw new Error(`❌ Lỗi parse AI response: ${e.message}\\nRaw (300 chars): ${raw}`);\n}\n\n// Lấy lại dữ liệu gốc từ node Tạo AI Prompt\nconst orig = $('📝 Tạo AI Prompt').first().json;\n\n// Normalize fields với default values\nconst keyTopics = Array.isArray(meetingMinutes.key_topics) ? meetingMinutes.key_topics : [];\nconst keyDecisions = Array.isArray(meetingMinutes.key_decisions) ? meetingMinutes.key_decisions : [];\nconst actionItems = Array.isArray(meetingMinutes.action_items) ? meetingMinutes.action_items : [];\nconst nextMeeting = meetingMinutes.next_meeting || {};\nconst score = Number(meetingMinutes.meeting_effectiveness_score) || 0;\n\n// Format action items thành text có emoji\nconst actionItemsText = actionItems\n  .map((item, i) => {\n    const p = item.priority === 'high' ? '🔴' : item.priority === 'medium' ? '🟡' : '🟢';\n    return `${i + 1}. ${p} ${item.task}\\n   👤 ${item.owner} | 📅 ${item.deadline || 'TBD'}`;\n  })\n  .join('\\n\\n');\n\n// Format decisions thành text\nconst decisionsText = keyDecisions\n  .map((d, i) => `${i + 1}. ✅ ${d.decision}\\n   👤 ${d.owner}`)\n  .join('\\n\\n');\n\nreturn [{\n  json: {\n    // Thông tin cuộc họp gốc\n    meeting_title: orig.meeting_title,\n    meeting_date: orig.meeting_date,\n    formatted_date: orig.formatted_date,\n    attendees: orig.attendees,\n    attendee_names: orig.attendee_names,\n    attendees_count: orig.attendees_count,\n    organizer_email: orig.organizer_email,\n    notification_chat_id: orig.notification_chat_id,\n    sheet_id: orig.sheet_id,\n    request_id: orig.request_id,\n    ai_model: orig.ai_model,\n    received_at: orig.received_at,\n\n    // Kết quả phân tích từ AI\n    meeting_summary: meetingMinutes.meeting_summary || '',\n    key_topics: keyTopics,\n    key_decisions: keyDecisions,\n    action_items: actionItems,\n    next_steps: meetingMinutes.next_steps || '',\n    next_meeting: nextMeeting,\n    effectiveness_score: score,\n    improvement_suggestions: meetingMinutes.improvement_suggestions || '',\n\n    // Formatted text versions\n    action_items_text: actionItemsText,\n    decisions_text: decisionsText,\n    action_items_count: actionItems.length,\n    decisions_count: keyDecisions.length,\n    topics_count: keyTopics.length,\n\n    processed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-response",
+      "name": "🔍 Parse Kết Quả AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 300],
+      "notes": "Parse response từ Gemini HOẶC DeepSeek:\n- Gemini: candidates[0].content.parts[0].text\n- DeepSeek: choices[0].message.content\n\nDùng $('📝 Tạo AI Prompt') để lấy lại dữ liệu gốc\nqua các nhánh AI khác nhau"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\n// ===== EMAIL HTML =====\nconst priorityBadge = (p) => {\n  if (p === 'high') return '<span style=\"background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:bold;\">🔴 CAO</span>';\n  if (p === 'medium') return '<span style=\"background:#fef9c3;color:#ca8a04;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:bold;\">🟡 TB</span>';\n  return '<span style=\"background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:bold;\">🟢 THẤP</span>';\n};\n\nconst actionRowsHtml = (data.action_items || []).map((item, i) => `\n  <tr style=\"background:${i % 2 === 0 ? '#ffffff' : '#f8fafc'}\">\n    <td style=\"padding:10px 12px;border:1px solid #e2e8f0;text-align:center;font-weight:bold;\">${i + 1}</td>\n    <td style=\"padding:10px 12px;border:1px solid #e2e8f0;\">${item.task}</td>\n    <td style=\"padding:10px 12px;border:1px solid #e2e8f0;\">${item.owner}</td>\n    <td style=\"padding:10px 12px;border:1px solid #e2e8f0;\">${item.deadline || 'TBD'}</td>\n    <td style=\"padding:10px 12px;border:1px solid #e2e8f0;text-align:center;\">${priorityBadge(item.priority)}</td>\n  </tr>`).join('');\n\nconst topicsHtml = (data.key_topics || []).map((t, i) => `\n  <div style=\"margin-bottom:16px;padding:14px;background:#f8fafc;border-left:4px solid #6366f1;border-radius:0 8px 8px 0;\">\n    <div style=\"font-weight:bold;color:#1e293b;margin-bottom:6px;\">${i + 1}. ${t.topic}</div>\n    <div style=\"color:#475569;font-size:14px;margin-bottom:6px;\">${t.summary}</div>\n    <div style=\"color:#6366f1;font-size:13px;\">→ Kết quả: <em>${t.outcome}</em></div>\n  </div>`).join('');\n\nconst decisionsHtml = (data.key_decisions || []).map((d, i) => `\n  <li style=\"margin-bottom:10px;padding:10px;background:#f0fdf4;border-radius:6px;\">\n    <strong style=\"color:#166534;\">${d.decision}</strong>\n    <div style=\"color:#4ade80;font-size:13px;margin-top:4px;\">👤 ${d.owner}${d.rationale ? ' — ' + d.rationale : ''}</div>\n  </li>`).join('');\n\nconst aiModelName = data.ai_model === 'gemini' ? 'Google Gemini 2.0 Flash' : 'DeepSeek Chat';\n\nconst emailHtml = `<!DOCTYPE html>\n<html lang=\"vi\">\n<head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>\n<body style=\"font-family:'Segoe UI',Arial,sans-serif;max-width:720px;margin:0 auto;padding:20px;color:#1e293b;background:#f1f5f9;\">\n\n<div style=\"background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:28px 32px;border-radius:12px 12px 0 0;\">\n  <h1 style=\"color:white;margin:0 0 8px;font-size:24px;\">📋 Biên Bản Cuộc Họp</h1>\n  <p style=\"color:rgba(255,255,255,0.85);margin:0;font-size:18px;font-weight:500;\">${data.meeting_title}</p>\n</div>\n\n<div style=\"background:white;padding:24px 32px;border-radius:0 0 12px 12px;box-shadow:0 4px 6px rgba(0,0,0,0.05);\">\n\n  <table style=\"width:100%;border-collapse:collapse;margin-bottom:28px;border-radius:8px;overflow:hidden;\">\n    <tr><td style=\"padding:10px 16px;background:#f1f5f9;font-weight:600;width:35%;\">📅 Ngày họp</td><td style=\"padding:10px 16px;border-bottom:1px solid #f1f5f9;\">${data.formatted_date}</td></tr>\n    <tr><td style=\"padding:10px 16px;background:#f1f5f9;font-weight:600;\">👥 Người tham dự</td><td style=\"padding:10px 16px;border-bottom:1px solid #f1f5f9;\">${data.attendee_names.join(', ')}</td></tr>\n    <tr><td style=\"padding:10px 16px;background:#f1f5f9;font-weight:600;\">🤖 Phân tích bởi</td><td style=\"padding:10px 16px;border-bottom:1px solid #f1f5f9;\">${aiModelName}</td></tr>\n    <tr><td style=\"padding:10px 16px;background:#f1f5f9;font-weight:600;\">⭐ Hiệu quả họp</td><td style=\"padding:10px 16px;\">${data.effectiveness_score}/10</td></tr>\n  </table>\n\n  <h2 style=\"color:#6366f1;border-bottom:2px solid #e2e8f0;padding-bottom:10px;font-size:18px;\">📌 Tóm Tắt</h2>\n  <p style=\"background:#f0fdf4;padding:14px 16px;border-radius:8px;border-left:4px solid #22c55e;line-height:1.7;\">${data.meeting_summary}</p>\n\n  <h2 style=\"color:#6366f1;border-bottom:2px solid #e2e8f0;padding-bottom:10px;font-size:18px;\">💬 Nội Dung Thảo Luận</h2>\n  ${topicsHtml}\n\n  <h2 style=\"color:#6366f1;border-bottom:2px solid #e2e8f0;padding-bottom:10px;font-size:18px;\">✅ Quyết Định Đã Đưa Ra (${data.decisions_count})</h2>\n  <ul style=\"list-style:none;padding:0;margin:0 0 24px;\">${decisionsHtml}</ul>\n\n  <h2 style=\"color:#6366f1;border-bottom:2px solid #e2e8f0;padding-bottom:10px;font-size:18px;\">📌 Action Items (${data.action_items_count})</h2>\n  <table style=\"width:100%;border-collapse:collapse;margin-bottom:24px;\">\n    <thead>\n      <tr style=\"background:#6366f1;color:white;\">\n        <th style=\"padding:10px 12px;text-align:center;width:40px;\">#</th>\n        <th style=\"padding:10px 12px;text-align:left;\">Công Việc</th>\n        <th style=\"padding:10px 12px;text-align:left;\">Người TH</th>\n        <th style=\"padding:10px 12px;text-align:left;\">Deadline</th>\n        <th style=\"padding:10px 12px;text-align:center;\">Ưu Tiên</th>\n      </tr>\n    </thead>\n    <tbody>${actionRowsHtml}</tbody>\n  </table>\n\n  ${data.next_steps ? `<h2 style=\"color:#6366f1;border-bottom:2px solid #e2e8f0;padding-bottom:10px;font-size:18px;\">🚀 Bước Tiếp Theo</h2><p style=\"line-height:1.7;margin-bottom:24px;\">${data.next_steps}</p>` : ''}\n\n  ${data.next_meeting && data.next_meeting.suggested_date ? `<div style=\"background:#eff6ff;padding:14px 16px;border-radius:8px;border-left:4px solid #3b82f6;margin-bottom:24px;\"><strong>📅 Họp tiếp theo:</strong> ${data.next_meeting.suggested_date}<br><span style=\"color:#3b82f6;font-size:14px;\">${data.next_meeting.agenda_preview || ''}</span></div>` : ''}\n\n  ${data.improvement_suggestions ? `<div style=\"background:#fffbeb;padding:14px 16px;border-radius:8px;border-left:4px solid #f59e0b;margin-bottom:24px;\"><strong>💡 Gợi ý cải thiện:</strong><br>${data.improvement_suggestions}</div>` : ''}\n\n  <hr style=\"border:1px solid #e2e8f0;margin:24px 0;\">\n  <p style=\"color:#94a3b8;font-size:12px;text-align:center;\">\n    Biên bản tạo tự động bởi n8n + ${aiModelName} | \n    ${new Date().toLocaleString('vi-VN', {timeZone: 'Asia/Ho_Chi_Minh'})} | \n    ID: ${data.request_id}\n  </p>\n\n</div>\n</body></html>`;\n\n// ===== TELEGRAM MESSAGE =====\nconst topActionItems = (data.action_items || []).slice(0, 5)\n  .map((item, i) => {\n    const p = item.priority === 'high' ? '🔴' : item.priority === 'medium' ? '🟡' : '🟢';\n    return `  ${i + 1}. ${p} ${item.task}\\n     👤 ${item.owner} | ${item.deadline || 'TBD'}`;\n  }).join('\\n');\n\nconst topDecisions = (data.key_decisions || []).slice(0, 3)\n  .map((d, i) => `  ${i + 1}. ${d.decision}`)\n  .join('\\n');\n\nconst telegramMessage = `📋 <b>BIÊN BẢN CUỘC HỌP</b>\n━━━━━━━━━━━━━━━━━━━━\n\n📌 <b>${data.meeting_title}</b>\n📅 ${data.formatted_date}\n👥 ${data.attendees_count} người tham dự\n🤖 AI: ${data.ai_model === 'gemini' ? 'Gemini 2.0' : 'DeepSeek'} | ⭐ ${data.effectiveness_score}/10\n\n<b>📝 Tóm tắt:</b>\n${data.meeting_summary}\n\n<b>✅ Quyết định (${data.decisions_count}):</b>\n${topDecisions || '  (Không có quyết định)'}\n\n<b>📌 Action Items (${data.action_items_count}):</b>\n${topActionItems || '  (Không có action items)'}\n${data.action_items_count > 5 ? `  <i>... và ${data.action_items_count - 5} items khác (xem email)</i>` : ''}\n\n${data.next_meeting && data.next_meeting.suggested_date ? `📅 <b>Họp tiếp:</b> ${data.next_meeting.suggested_date}` : ''}\n━━━━━━━━━━━━━━━━━━━━\n<i>✉️ Email đã gửi cho ${data.attendees_count} người</i>\n<i>📊 Đã lưu Google Sheets | ID: ${data.request_id}</i>`;\n\n// ===== GOOGLE SHEETS DATA =====\nconst sheetsRow = {\n  'Request ID': data.request_id,\n  'Meeting Title': data.meeting_title,\n  'Meeting Date': data.meeting_date,\n  'Attendees': data.attendee_names.join(', '),\n  'Attendees Count': data.attendees_count,\n  'Summary': data.meeting_summary,\n  'Action Items Count': data.action_items_count,\n  'Decisions Count': data.decisions_count,\n  'Topics Count': data.topics_count,\n  'Effectiveness Score': data.effectiveness_score,\n  'Next Meeting': (data.next_meeting && data.next_meeting.suggested_date) || '',\n  'AI Model': data.ai_model,\n  'Email Recipients': data.attendees.join(', '),\n  'Processed At': data.processed_at,\n  'Action Items JSON': JSON.stringify(data.action_items),\n  'Decisions JSON': JSON.stringify(data.key_decisions)\n};\n\nreturn [{\n  json: {\n    ...data,\n    email_html: emailHtml,\n    telegram_message: telegramMessage,\n    sheets_row: sheetsRow,\n    email_to: data.attendees.length > 0 ? data.attendees.join(',') : data.organizer_email,\n    has_telegram: data.notification_chat_id && data.notification_chat_id.length > 2\n  }\n}];"
+      },
+      "id": "format-outputs",
+      "name": "✍️ Format Email & Thông Báo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1930, 300],
+      "notes": "Chuẩn bị output cho 3 kênh:\n1. Email HTML (responsive, có table action items)\n2. Telegram message (HTML format, rút gọn)\n3. Google Sheets row data\n\nĐặt email_to: dùng attendees nếu có, else organizer"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Meeting Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Request ID": "={{ $json.sheets_row['Request ID'] }}",
+            "Meeting Title": "={{ $json.sheets_row['Meeting Title'] }}",
+            "Meeting Date": "={{ $json.sheets_row['Meeting Date'] }}",
+            "Attendees": "={{ $json.sheets_row['Attendees'] }}",
+            "Attendees Count": "={{ $json.sheets_row['Attendees Count'] }}",
+            "Summary": "={{ $json.sheets_row['Summary'] }}",
+            "Action Items Count": "={{ $json.sheets_row['Action Items Count'] }}",
+            "Decisions Count": "={{ $json.sheets_row['Decisions Count'] }}",
+            "Topics Count": "={{ $json.sheets_row['Topics Count'] }}",
+            "Effectiveness Score": "={{ $json.sheets_row['Effectiveness Score'] }}",
+            "Next Meeting": "={{ $json.sheets_row['Next Meeting'] }}",
+            "AI Model": "={{ $json.sheets_row['AI Model'] }}",
+            "Email Recipients": "={{ $json.sheets_row['Email Recipients'] }}",
+            "Processed At": "={{ $json.sheets_row['Processed At'] }}",
+            "Action Items JSON": "={{ $json.sheets_row['Action Items JSON'] }}",
+            "Decisions JSON": "={{ $json.sheets_row['Decisions JSON'] }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "google-sheets-log",
+      "name": "📊 Google Sheets: Lưu Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2210, 150],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NHẬP_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "⚙️ Cài đặt Google Sheet:\n1. Tạo sheet mới tên: 'Meeting Log'\n2. Row 1 là header với các cột:\n   Request ID, Meeting Title, Meeting Date,\n   Attendees, Attendees Count, Summary,\n   Action Items Count, Decisions Count,\n   Topics Count, Effectiveness Score,\n   Next Meeting, AI Model, Email Recipients,\n   Processed At, Action Items JSON, Decisions JSON\n3. Nhập Sheet ID vào sheet_id trong request"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_to }}",
+        "subject": "=[Biên Bản Họp] {{ $json.meeting_title }} - {{ $json.meeting_date }}",
+        "message": "={{ $json.email_html }}",
+        "options": {
+          "isHtml": true,
+          "fromAlias": "Meeting Minutes Bot"
+        }
+      },
+      "id": "gmail-send",
+      "name": "📧 Gmail: Gửi Biên Bản",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2210, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "NHẬP_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      },
+      "notes": "Gửi email biên bản họp đến:\n- attendees[] nếu có\n- organizer_email nếu không có attendees\n\nEmail format: HTML đẹp với table action items\nFrom alias: Meeting Minutes Bot"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "telegram-check",
+              "leftValue": "={{ $json.has_telegram }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-telegram",
+      "name": "🔀 IF: Gửi Telegram?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2490, 300],
+      "notes": "Kiểm tra notification_chat_id có hợp lệ không\n- TRUE → Gửi thông báo Telegram\n- FALSE → Bỏ qua, đến Respond trực tiếp"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.notification_chat_id }}",
+        "text": "={{ $json.telegram_message }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "telegram-notify",
+      "name": "📱 Telegram: Thông Báo Team",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2770, 150],
+      "credentials": {
+        "telegramApi": {
+          "id": "NHẬP_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "notes": "Gửi tóm tắt biên bản họp lên Telegram\n\nNội dung (rút gọn):\n- Tên cuộc họp, ngày, số người\n- Tóm tắt\n- Top 3 quyết định\n- Top 5 action items\n- Thông tin họp tiếp theo\n\nFormat: HTML (parse_mode: HTML)"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  success: true,\n  request_id: $json.request_id,\n  meeting_title: $json.meeting_title,\n  meeting_date: $json.meeting_date,\n  ai_model_used: $json.ai_model,\n  results: {\n    action_items_count: $json.action_items_count,\n    decisions_count: $json.decisions_count,\n    topics_count: $json.topics_count,\n    effectiveness_score: $json.effectiveness_score\n  },\n  notifications: {\n    email_sent_to: $json.email_to,\n    telegram_notified: $json.has_telegram,\n    google_sheets_logged: true\n  },\n  processed_at: $json.processed_at\n}) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-webhook",
+      "name": "✅ Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [3050, 300],
+      "notes": "Trả về JSON response cho client:\n{\n  success: true,\n  request_id: ...,\n  results: { action_items, decisions, topics, score },\n  notifications: { email, telegram, sheets }\n}"
+    }
+  ],
+  "connections": {
+    "📥 Webhook: Nhận Transcript": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Validate & Chuẩn Bị Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Validate & Chuẩn Bị Data": {
+      "main": [
+        [
+          {
+            "node": "📝 Tạo AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Tạo AI Prompt": {
+      "main": [
+        [
+          {
+            "node": "🔀 IF: Dùng Gemini?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 IF: Dùng Gemini?": {
+      "main": [
+        [
+          {
+            "node": "🤖 Gemini: Phân Tích Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🤖 DeepSeek: Phân Tích Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Gemini: Phân Tích Transcript": {
+      "main": [
+        [
+          {
+            "node": "🔍 Parse Kết Quả AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 DeepSeek: Phân Tích Transcript": {
+      "main": [
+        [
+          {
+            "node": "🔍 Parse Kết Quả AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Parse Kết Quả AI": {
+      "main": [
+        [
+          {
+            "node": "✍️ Format Email & Thông Báo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✍️ Format Email & Thông Báo": {
+      "main": [
+        [
+          {
+            "node": "📊 Google Sheets: Lưu Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📧 Gmail: Gửi Biên Bản",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔀 IF: Gửi Telegram?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Google Sheets: Lưu Log": {
+      "main": [
+        []
+      ]
+    },
+    "📧 Gmail: Gửi Biên Bản": {
+      "main": [
+        []
+      ]
+    },
+    "🔀 IF: Gửi Telegram?": {
+      "main": [
+        [
+          {
+            "node": "📱 Telegram: Thông Báo Team",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "✅ Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📱 Telegram: Thông Báo Team": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "📥 Webhook: Nhận Transcript": [
+      {
+        "json": {
+          "body": {
+            "meeting_title": "Sprint 3 Review & Sprint 4 Planning",
+            "meeting_date": "2026-05-11",
+            "attendees": [
+              "minh.nguyen@company.vn",
+              "hoa.tran@company.vn",
+              "tuan.le@company.vn",
+              "trang.pham@company.vn"
+            ],
+            "attendee_names": [
+              "Nguyễn Văn Minh (PM)",
+              "Trần Thị Hoa (Dev)",
+              "Lê Văn Tuấn (Dev)",
+              "Phạm Thu Trang (QA)"
+            ],
+            "transcript": "Nguyễn Văn Minh: Chào mọi người. Hôm nay chúng ta họp để review sprint 3 và lên kế hoạch sprint 4. Mời Hoa báo cáo tiến độ trước.\n\nTrần Thị Hoa: Dạ, sprint 3 tôi đã hoàn thành 100% các task được giao:\n- Tính năng đăng nhập và quản lý user: DONE\n- Dashboard chính với biểu đồ analytics: DONE\n- API tích hợp với bên thứ 3: DONE và đã test\nTất cả đều đúng deadline.\n\nNguyễn Văn Minh: Tốt lắm Hoa. Tuấn, module thanh toán sao rồi?\n\nLê Văn Tuấn: Dạ anh, module thanh toán đã xong 90%, còn 1 bug liên quan đến timeout khi giao dịch lớn hơn 5 triệu VNĐ. Tôi đã tìm ra nguyên nhân là do config timeout của payment gateway, cần thêm 1 ngày để fix và test lại.\n\nNguyễn Văn Minh: OK, vậy Tuấn ưu tiên fix bug thanh toán trước ngày 13/5 nhé. Nếu cần hỗ trợ thì báo tôi. Trang, tình hình QA sprint 3?\n\nPhạm Thu Trang: Anh ơi, tôi cần ít nhất 3 ngày để test toàn bộ sprint 3, đặc biệt là regression test. Hiện tại tôi đang test module thanh toán và đăng nhập. Có 2 bug nhỏ về UI tôi đã tạo ticket rồi.\n\nNguyễn Văn Minh: Hiểu rồi. Vậy release date sprint 3 dời sang ngày 20/5. Bây giờ chuyển qua kế hoạch sprint 4. Hoa, sprint 4 em dự định làm gì?\n\nTrần Thị Hoa: Sprint 4 tôi sẽ tập trung vào:\n1. Tính năng gửi thông báo email tự động\n2. Tính năng export báo cáo PDF\n3. Cải thiện performance dashboard (đang load hơi chậm)\n\nNguyễn Văn Minh: OK. Tuấn thì sao?\n\nLê Văn Tuấn: Tôi sẽ:\n1. Hoàn thiện module thanh toán (sau khi fix bug)\n2. Implement API xuất báo cáo Excel\n3. Tích hợp tính năng refund cho đơn hàng\n\nNguyễn Văn Minh: Trang, QA sprint 4 cần gì đặc biệt không?\n\nPhạm Thu Trang: Tôi cần có test environment riêng cho payment testing. Hiện tại đang dùng chung môi trường với dev nên hay bị conflict. Và cần automation test framework setup sớm.\n\nNguyễn Văn Minh: Đồng ý, tôi sẽ làm việc với DevOps để setup môi trường test riêng trước ngày 15/5. Automation framework thì Trang lên plan và share cho team trước thứ 6 này (15/5) nhé.\n\nPhạm Thu Trang: Vâng anh, tôi sẽ chuẩn bị.\n\nNguyễn Văn Minh: Tổng kết: Sprint 3 hoàn thành tốt, release dời sang 20/5 để QA đủ thời gian. Sprint 4 bắt đầu 13/5. Họp tiếp theo là thứ 2 tuần sau, 18/5 lúc 9h sáng. Mọi người có câu hỏi gì không?\n\n(Không có câu hỏi)\n\nNguyễn Văn Minh: OK vậy kết thúc. Cảm ơn mọi người!",
+            "ai_model": "gemini",
+            "organizer_email": "minh.nguyen@company.vn",
+            "notification_chat_id": "123456789",
+            "sheet_id": "NHẬP_GOOGLE_SHEET_ID_THẬT"
+          }
+        }
+      }
+    ]
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "tags": [
+    {
+      "name": "enterprise",
+      "createdAt": "2026-05-11T00:00:00.000Z",
+      "updatedAt": "2026-05-11T00:00:00.000Z"
+    },
+    {
+      "name": "ai",
+      "createdAt": "2026-05-11T00:00:00.000Z",
+      "updatedAt": "2026-05-11T00:00:00.000Z"
+    },
+    {
+      "name": "meeting",
+      "createdAt": "2026-05-11T00:00:00.000Z",
+      "updatedAt": "2026-05-11T00:00:00.000Z"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "n8n-teaching-collection"
+  },
+  "id": "enterprise-meeting-transcript-ai-v1"
+}

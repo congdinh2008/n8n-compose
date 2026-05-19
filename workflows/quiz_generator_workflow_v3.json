@@ -3,41 +3,90 @@
   "nodes": [
     {
       "parameters": {
-        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
         "event": "fileCreated",
         "triggerOn": "specificFolder",
         "folderId": "NHẬP_ID_FOLDER_A_VÀO_ĐÂY",
-        "options": { "fields": ["id", "name", "mimeType", "webViewLink"] }
+        "options": {
+          "fields": [
+            "id",
+            "name",
+            "mimeType",
+            "webViewLink"
+          ]
+        }
       },
       "id": "trigger-google-drive",
       "name": "Google Drive Trigger",
       "type": "n8n-nodes-base.googleDriveTrigger",
       "typeVersion": 1,
-      "position": [0, 0],
-      "credentials": { "googleDriveOAuth2Api": { "id": "kIn77hC1D3e4d8C0", "name": "Google Drive account" } },
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Drive account"
+        }
+      },
       "notesInFlow": true,
       "notes": "Nhập ID Folder A (thay NHẬP_ID_FOLDER_A_VÀO_ĐÂY)"
     },
     {
       "parameters": {
         "conditions": {
-          "string": [{ "value1": "={{$json.mimeType}}", "value2": "application/vnd.google-apps.folder" }]
+          "string": [
+            {
+              "value1": "={{$json.mimeType}}",
+              "value2": "application/vnd.google-apps.folder"
+            }
+          ]
         }
       },
       "id": "filter-folder",
       "name": "Check is Folder",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [200, 0]
+      "position": [
+        200,
+        0
+      ]
     },
     {
       "parameters": {
         "values": {
           "string": [
-            { "name": "sheetId", "value": "NHẬP_ID_GOOGLE_SHEET_VÀO_ĐÂY" },
-            { "name": "folderName", "value": "={{$json.name}}" },
-            { "name": "folderLink", "value": "={{$json.webViewLink}}" },
-            { "name": "folderId", "value": "={{$json.id}}" }
+            {
+              "name": "sheetId",
+              "value": "NHẬP_ID_GOOGLE_SHEET_VÀO_ĐÂY"
+            },
+            {
+              "name": "folderName",
+              "value": "={{$json.name}}"
+            },
+            {
+              "name": "folderLink",
+              "value": "={{$json.webViewLink}}"
+            },
+            {
+              "name": "folderId",
+              "value": "={{$json.id}}"
+            },
+            {
+              "name": "telegramBotToken",
+              "value": "NHẬP_BOT_TOKEN_TELEGRAM_VÀO_ĐÂY"
+            },
+            {
+              "name": "telegramChatId",
+              "value": "NHẬP_CHAT_ID_TELEGRAM_VÀO_ĐÂY"
+            }
           ]
         },
         "options": {}
@@ -46,7 +95,10 @@
       "name": "Set Variables",
       "type": "n8n-nodes-base.set",
       "typeVersion": 2,
-      "position": [400, 0]
+      "position": [
+        400,
+        0
+      ]
     },
     {
       "parameters": {
@@ -60,8 +112,16 @@
       "name": "Get Sheet Data",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [600, 0],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "kIn77hC1D3e4d8C0", "name": "Google Sheets account" } },
+      "position": [
+        600,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Sheets account"
+        }
+      },
       "notesInFlow": true,
       "notes": "HTTP Request thẳng vào Sheets API v4 — tránh lỗi version của Google Sheets node"
     },
@@ -73,13 +133,27 @@
       "name": "Find Folder in Sheet",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [800, 0]
+      "position": [
+        800,
+        0
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "boolean": [{ "value1": "={{$json.found === false}}", "value2": true }],
-          "string": [{ "value1": "={{$json.status}}", "operation": "notEqual", "value2": "Done" }]
+          "boolean": [
+            {
+              "value1": "={{$json.found === false}}",
+              "value2": true
+            }
+          ],
+          "string": [
+            {
+              "value1": "={{$json.status}}",
+              "operation": "notEqual",
+              "value2": "Done"
+            }
+          ]
         },
         "combineOperation": "any"
       },
@@ -87,27 +161,46 @@
       "name": "If Not Done or Not Exists",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [1000, 0]
+      "position": [
+        1000,
+        0
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "boolean": [{ "value1": "={{$json.found === false}}", "value2": true }]
+          "boolean": [
+            {
+              "value1": "={{$json.found === false}}",
+              "value2": true
+            }
+          ]
         }
       },
       "id": "if-new-entry",
       "name": "If New Entry",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [1200, 0],
+      "position": [
+        1200,
+        0
+      ],
       "notesInFlow": true,
       "notes": "True: folder mới → append row vào Sheet\nFalse: folder đã có (retry) → bỏ qua append"
     },
     {
       "parameters": {
         "operation": "append",
-        "documentId": { "__rl": true, "value": "={{$('Set Variables').item.json.sheetId}}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Sheet1", "mode": "name" },
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Set Variables').item.json.sheetId}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
@@ -123,8 +216,16 @@
       "name": "Add to Sheet (Queue)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [1400, -160],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "kIn77hC1D3e4d8C0", "name": "Google Sheets account" } }
+      "position": [
+        1400,
+        -160
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Sheets account"
+        }
+      }
     },
     {
       "parameters": {
@@ -139,8 +240,14 @@
               "name": "q",
               "value": "={{ `'${$('Google Drive Trigger').item.json.id}' in parents and mimeType != 'application/vnd.google-apps.folder'` }}"
             },
-            { "name": "fields", "value": "files(id,name,mimeType)" },
-            { "name": "pageSize", "value": "100" }
+            {
+              "name": "fields",
+              "value": "files(id,name,mimeType)"
+            },
+            {
+              "name": "pageSize",
+              "value": "100"
+            }
           ]
         },
         "options": {}
@@ -149,8 +256,16 @@
       "name": "List Files in Folder",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1800, 0],
-      "credentials": { "googleDriveOAuth2Api": { "id": "kIn77hC1D3e4d8C0", "name": "Google Drive account" } },
+      "position": [
+        1800,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Drive account"
+        }
+      },
       "notesInFlow": true,
       "notes": "Drive API v3: list files inside the new subfolder.\nQuery param q lọc đúng parent folder và loại bỏ subfolder."
     },
@@ -162,21 +277,33 @@
       "name": "Split Files to Items",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2000, 0],
+      "position": [
+        2000,
+        0
+      ],
       "notesInFlow": true,
       "notes": "Tách mảng files[] từ Drive API thành các items riêng lẻ.\nTrả về [] nếu không có file → If Files Exist nhận 0 items → dừng."
     },
     {
       "parameters": {
         "conditions": {
-          "number": [{ "value1": "={{$input.all().length}}", "operation": "larger", "value2": 0 }]
+          "number": [
+            {
+              "value1": "={{$input.all().length}}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
         }
       },
       "id": "check-files-exist",
       "name": "If Files Exist",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [2200, 0]
+      "position": [
+        2200,
+        0
+      ]
     },
     {
       "parameters": {
@@ -188,8 +315,16 @@
       "name": "Download File",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 2,
-      "position": [2400, 0],
-      "credentials": { "googleDriveOAuth2Api": { "id": "kIn77hC1D3e4d8C0", "name": "Google Drive account" } }
+      "position": [
+        2400,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Drive account"
+        }
+      }
     },
     {
       "parameters": {
@@ -199,7 +334,10 @@
       "name": "Merge Text Content",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2600, 0]
+      "position": [
+        2600,
+        0
+      ]
     },
     {
       "parameters": {
@@ -216,8 +354,16 @@
       "name": "AI Generate Quiz Questions",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2800, 0],
-      "credentials": { "googlePalmApi": { "id": "deiN1WmQ733K0N25", "name": "Google Gemini(PaLM) Api account" } }
+      "position": [
+        2800,
+        0
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "deiN1WmQ733K0N25",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
     },
     {
       "parameters": {
@@ -227,34 +373,56 @@
       "name": "Parse AI Quiz Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3000, 0]
+      "position": [
+        3000,
+        0
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "number": [{ "value1": "={{$json.totalQuestions}}", "operation": "largerEqual", "value2": 10 }]
+          "number": [
+            {
+              "value1": "={{$json.totalQuestions}}",
+              "operation": "largerEqual",
+              "value2": 10
+            }
+          ]
         }
       },
       "id": "validate-quiz",
       "name": "Validate Quiz Questions",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [3200, 0],
+      "position": [
+        3200,
+        0
+      ],
       "notesInFlow": true,
       "notes": "True (≥10 câu): tạo form\nFalse (<10 câu): cập nhật Failed + alert Telegram"
     },
     {
       "parameters": {
         "operation": "update",
-        "documentId": { "__rl": true, "value": "={{$('Set Variables').item.json.sheetId}}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Sheet1", "mode": "name" },
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Set Variables').item.json.sheetId}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
             "Folder Name": "={{$('Set Variables').item.json.folderName}}",
             "Status": "Failed"
           },
-          "matchingColumns": ["Folder Name"],
+          "matchingColumns": [
+            "Folder Name"
+          ],
           "schema": []
         },
         "options": {}
@@ -263,21 +431,36 @@
       "name": "Update Sheet Status Failed",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [3400, 200],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "kIn77hC1D3e4d8C0", "name": "Google Sheets account" } }
+      "position": [
+        3400,
+        200
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Sheets account"
+        }
+      }
     },
     {
       "parameters": {
-        "chatId": "NHẬP_CHAT_ID_TELEGRAM",
-        "text": "={{'❌ Tạo Quiz THẤT BẠI: ' + $('Set Variables').item.json.folderName + '\\n\\nLý do: AI chỉ tạo được ' + $('Parse AI Quiz Response').item.json.totalQuestions + ' câu (yêu cầu ≥10).' + '\\nFinish reason: ' + $('Parse AI Quiz Response').item.json.finishReason + '\\n\\n📁 Folder: ' + $('Set Variables').item.json.folderLink + '\\n\\n👉 Kiểm tra nội dung file hoặc thử lại.'}}",
-        "additionalFields": {}
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $('Set Variables').item.json.telegramBotToken + '/sendMessage' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\\n  const folderName = $('Set Variables').item.json.folderName;\\n  const totalQuestions = $('Parse AI Quiz Response').item.json.totalQuestions;\\n  const finishReason = $('Parse AI Quiz Response').item.json.finishReason;\\n  const folderLink = $('Set Variables').item.json.folderLink;\\n  return {\\n    chat_id: $('Set Variables').item.json.telegramChatId,\\n    text: [\\n      '❌ <b>Tạo Quiz THẤT BẠI</b>',\\n      '',\\n      '📋 <b>' + folderName + '</b>',\\n      '',\\n      '⚠️ <b>Lý do:</b> AI chỉ tạo được ' + totalQuestions + ' câu (yêu cầu ≥10).',\\n      '🔍 Finish reason: ' + finishReason,\\n      '',\\n      '📁 <b>Folder:</b> ' + folderLink,\\n      '',\\n      '👉 Kiểm tra nội dung file hoặc thử lại.'\\n    ].join('\\n'),\\n    parse_mode: 'HTML'\\n  };\\n})() }}",
+        "options": {}
       },
       "id": "telegram-failed",
       "name": "Telegram Alert Failed",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1,
-      "position": [3600, 200],
-      "credentials": { "telegramApi": { "id": "", "name": "Telegram account" } }
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3600,
+        200
+      ],
+      "notesInFlow": true,
+      "notes": "Thông báo lỗi qua Telegram\nDùng Bot Token và Chat ID từ Set Variables"
     },
     {
       "parameters": {
@@ -294,8 +477,16 @@
       "name": "Create Google Form",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3400, 0],
-      "credentials": { "googleDriveOAuth2Api": { "id": "kIn77hC1D3e4d8C0", "name": "Google Drive account" } }
+      "position": [
+        3400,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Drive account"
+        }
+      }
     },
     {
       "parameters": {
@@ -305,21 +496,63 @@
         "nodeCredentialType": "googleDriveOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ (() => {\n  const formId = $json.formId;\n  const questions = $('Parse AI Quiz Response').item.json.questions;\n  const description = $('Parse AI Quiz Response').item.json.description;\n  const requests = [];\n  if (description) {\n    requests.push({ updateFormInfo: { info: { description }, updateMask: 'description' } });\n  }\n  requests.push({ updateSettings: { settings: { quizSettings: { isQuiz: true } }, updateMask: 'quizSettings.isQuiz' } });\n  questions.forEach((q, index) => {\n    const options = Object.entries(q.options || {}).map(([key, value]) => ({ value: `${key}. ${value}` }));\n    const correctKey = q.correctAnswer;\n    const correctOptionValue = `${correctKey}. ${(q.options || {})[correctKey]}`;\n    requests.push({\n      createItem: {\n        item: {\n          title: q.question,\n          description: q.explanation ? `💡 Giải thích: ${q.explanation}` : '',\n          questionItem: {\n            question: {\n              required: true,\n              grading: {\n                pointValue: 1,\n                correctAnswers: { answers: [{ value: correctOptionValue }] },\n                whenRight: { text: '✅ Chính xác!' },\n                whenWrong: { text: `❌ Đáp án đúng là: ${correctOptionValue}` }\n              },\n              choiceQuestion: { type: 'RADIO', options, shuffle: false }\n            }\n          }\n        },\n        location: { index }\n      }\n    });\n  });\n  return { requests };\n})() }}",
+        "jsonBody": "={{ (() => {\n  const formId = $json.formId;\n  const questions = $('Parse AI Quiz Response').item.json.questions;\n  const description = $('Parse AI Quiz Response').item.json.description;\n  const requests = [];\n  if (description) {\n    requests.push({ updateFormInfo: { info: { description }, updateMask: 'description' } });\n  }\n  requests.push({ updateSettings: { settings: { quizSettings: { isQuiz: true } }, updateMask: 'quizSettings.isQuiz' } });\n  questions.forEach((q, index) => {\n    const options = Object.entries(q.options || {}).map(([key, value]) => ({ value: `${key}. ${value}` }));\n    const correctKey = q.correctAnswer;\n    const correctOptionValue = `${correctKey}. ${(q.options || {})[correctKey]}`;\n    requests.push({\n      createItem: {\n        item: {\n          title: q.question,\n          description: '',\n          questionItem: {\n            question: {\n              required: true,\n              grading: {\n                pointValue: 1,\n                correctAnswers: { answers: [{ value: correctOptionValue }] },\n                whenRight: { text: '✅ Chính xác!' },\n                whenWrong: { text: `❌ Đáp án đúng là: ${correctOptionValue}` }\n              },\n              choiceQuestion: { type: 'RADIO', options, shuffle: false }\n            }\n          }\n        },\n        location: { index }\n      }\n    });\n  });\n  return { requests };\n})() }}",
         "options": {}
       },
       "id": "7aa47221-d920-474a-a4ba-6c6e183a4558",
       "name": "Add Quiz Questions to Form",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3600, 0],
-      "credentials": { "googleDriveOAuth2Api": { "id": "kIn77hC1D3e4d8C0", "name": "Google Drive account" } }
+      "position": [
+        3600,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/' + $('Set Variables').item.json.sheetId + ':batchUpdate' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\n  const questions = $('Parse AI Quiz Response').item.json.questions || [];\n  const folderName = $('Set Variables').item.json.folderName || 'Quiz';\n  let safeSheetName = folderName.replace(/[^a-zA-Z0-9 -_]/g, ' ').trim().substring(0, 90) + ' ' + Math.floor(Math.random() * 1000);\n  const sheetId = Math.floor(Math.random() * 10000000) + 10000;\n  const requests = [];\n  requests.push({\n    addSheet: {\n      properties: {\n        sheetId: sheetId,\n        title: safeSheetName\n      }\n    }\n  });\n  const rows = [];\n  rows.push({\n    values: [\n      { userEnteredValue: { stringValue: \"Question\" } },\n      { userEnteredValue: { stringValue: \"Option A\" } },\n      { userEnteredValue: { stringValue: \"Option B\" } },\n      { userEnteredValue: { stringValue: \"Option C\" } },\n      { userEnteredValue: { stringValue: \"Option D\" } },\n      { userEnteredValue: { stringValue: \"Correct Answer\" } },\n      { userEnteredValue: { stringValue: \"Explanation\" } }\n    ]\n  });\n  questions.forEach(q => {\n    rows.push({\n      values: [\n        { userEnteredValue: { stringValue: q.question || \"\" } },\n        { userEnteredValue: { stringValue: (q.options && q.options.A) || \"\" } },\n        { userEnteredValue: { stringValue: (q.options && q.options.B) || \"\" } },\n        { userEnteredValue: { stringValue: (q.options && q.options.C) || \"\" } },\n        { userEnteredValue: { stringValue: (q.options && q.options.D) || \"\" } },\n        { userEnteredValue: { stringValue: q.correctAnswer || \"\" } },\n        { userEnteredValue: { stringValue: q.explanation || \"\" } }\n      ]\n    });\n  });\n  requests.push({\n    appendCells: {\n      sheetId: sheetId,\n      rows: rows,\n      fields: \"userEnteredValue\"\n    }\n  });\n  return { requests };\n})() }}",
+        "options": {}
+      },
+      "id": "save-questions-to-sheet",
+      "name": "Save Questions to Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3700,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Sheets account"
+        }
+      }
     },
     {
       "parameters": {
         "operation": "update",
-        "documentId": { "__rl": true, "value": "={{$('Set Variables').item.json.sheetId}}", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Sheet1", "mode": "name" },
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Set Variables').item.json.sheetId}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
@@ -329,7 +562,9 @@
             "Form Link": "={{$('Create Google Form').item.json.responderUri}}",
             "Form Result Link": "={{'https://docs.google.com/forms/d/' + $('Create Google Form').item.json.formId + '/viewanalytics'}}"
           },
-          "matchingColumns": ["Folder Name"],
+          "matchingColumns": [
+            "Folder Name"
+          ],
           "schema": []
         },
         "options": {}
@@ -338,89 +573,277 @@
       "name": "Update Status Done",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
-      "position": [3800, 0],
-      "credentials": { "googleSheetsOAuth2Api": { "id": "kIn77hC1D3e4d8C0", "name": "Google Sheets account" } }
+      "position": [
+        3900,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "kIn77hC1D3e4d8C0",
+          "name": "Google Sheets account"
+        }
+      }
     },
     {
       "parameters": {
-        "chatId": "NHẬP_CHAT_ID_TELEGRAM",
-        "text": "={{'✅ Đã tạo xong Quiz: ' + $('Set Variables').item.json.folderName + '\\n\\n📝 Link Form (học viên): ' + $('Create Google Form').item.json.responderUri + '\\n✏️ Link chỉnh sửa: https://docs.google.com/forms/d/' + $('Create Google Form').item.json.formId + '/edit' + '\\n📊 Kết quả: https://docs.google.com/forms/d/' + $('Create Google Form').item.json.formId + '/viewanalytics' + '\\n\\nTổng số câu hỏi: ' + $('Parse AI Quiz Response').item.json.totalQuestions}}",
-        "additionalFields": {}
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $('Set Variables').item.json.telegramBotToken + '/sendMessage' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\\n  const folderName = $('Set Variables').item.json.folderName;\\n  const responderUri = $('Create Google Form').item.json.responderUri;\\n  const formId = $('Create Google Form').item.json.formId;\\n  const totalQuestions = $('Parse AI Quiz Response').item.json.totalQuestions;\\n  return {\\n    chat_id: $('Set Variables').item.json.telegramChatId,\\n    text: [\\n      '✅ <b>Đã tạo xong Quiz</b>',\\n      '',\\n      '📋 <b>' + folderName + '</b>',\\n      '',\\n      '📝 <b>Link Form (học viên):</b>',\\n      responderUri,\\n      '',\\n      '✏️ <b>Link chỉnh sửa:</b>',\\n      'https://docs.google.com/forms/d/' + formId + '/edit',\\n      '',\\n      '📊 <b>Kết quả:</b>',\\n      'https://docs.google.com/forms/d/' + formId + '/viewanalytics',\\n      '',\\n      ' Tổng số câu hỏi: <b>' + totalQuestions + '</b>'\\n    ].join('\\n'),\\n    parse_mode: 'HTML'\\n  };\\n})() }}",
+        "options": {}
       },
       "id": "telegram",
       "name": "Telegram Bot",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1,
-      "position": [4000, 0],
-      "credentials": { "telegramApi": { "id": "", "name": "Telegram account" } }
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4100,
+        0
+      ],
+      "notesInFlow": true,
+      "notes": "Thông báo thành công qua Telegram\nDùng Bot Token và Chat ID từ Set Variables"
     }
   ],
   "connections": {
     "Google Drive Trigger": {
-      "main": [[{ "node": "Check is Folder", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Check is Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Check is Folder": {
-      "main": [[{ "node": "Set Variables", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Set Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Set Variables": {
-      "main": [[{ "node": "Get Sheet Data", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Get Sheet Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Get Sheet Data": {
-      "main": [[{ "node": "Find Folder in Sheet", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Find Folder in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Find Folder in Sheet": {
-      "main": [[{ "node": "If Not Done or Not Exists", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "If Not Done or Not Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "If Not Done or Not Exists": {
-      "main": [[{ "node": "If New Entry", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "If New Entry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "If New Entry": {
       "main": [
-        [{ "node": "Add to Sheet (Queue)", "type": "main", "index": 0 }],
+        [
+          {
+            "node": "Add to Sheet (Queue)",
+            "type": "main",
+            "index": 0
+          }
+        ],
         []
       ]
     },
     "Add to Sheet (Queue)": {
-      "main": [[{ "node": "List Files in Folder", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "List Files in Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "List Files in Folder": {
-      "main": [[{ "node": "Split Files to Items", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Split Files to Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Split Files to Items": {
-      "main": [[{ "node": "If Files Exist", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "If Files Exist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "If Files Exist": {
-      "main": [[{ "node": "Download File", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Download File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Download File": {
-      "main": [[{ "node": "Merge Text Content", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Merge Text Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Merge Text Content": {
-      "main": [[{ "node": "AI Generate Quiz Questions", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "AI Generate Quiz Questions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "AI Generate Quiz Questions": {
-      "main": [[{ "node": "Parse AI Quiz Response", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Parse AI Quiz Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Parse AI Quiz Response": {
-      "main": [[{ "node": "Validate Quiz Questions", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Validate Quiz Questions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Validate Quiz Questions": {
       "main": [
-        [{ "node": "Create Google Form", "type": "main", "index": 0 }],
-        [{ "node": "Update Sheet Status Failed", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Create Google Form",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sheet Status Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Update Sheet Status Failed": {
-      "main": [[{ "node": "Telegram Alert Failed", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Telegram Alert Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Create Google Form": {
-      "main": [[{ "node": "Add Quiz Questions to Form", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Add Quiz Questions to Form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Add Quiz Questions to Form": {
-      "main": [[{ "node": "Update Status Done", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Save Questions to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Questions to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Update Status Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Update Status Done": {
-      "main": [[{ "node": "Telegram Bot", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Telegram Bot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,

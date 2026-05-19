@@ -1,255 +1,176 @@
-# 📧 Enterprise: Email Campaign (Welcome Series)
+# 📧 Enterprise: Email Campaign Automation
 
 ## Mục tiêu
-Tự động hóa **email campaign welcome series** cho user mới signup:
-- Email #1: Welcome (ngay lập tức)
-- Email #2: Getting Started (sau 2 ngày)
-- Email #3: Advanced Tips (sau 3 ngày nữa, nếu mở email #2) HOẶC Email #2b: Reminder (nếu không mở)
+Tự động hóa **email campaign welcome series**:
+1. Immediate: Welcome Email #1
+2. Wait 2 days: Getting Started #2
+3. Wait 3 days: Advanced Tips #3 (IF opened #2) OR Resend #2b (IF not opened)
+4. Wait 5 days: Special Offer #4
+5. Track all sends/opens in Google Sheets
 
 ## Đối tượng sử dụng
-**Doanh nghiệp** - Marketing teams, product teams, bất kỳ ai cần onboard user mới qua email sequence.
+**Doanh nghiệp** - Marketing teams, onboarding new users, customer nurturing.
 
 ## Sơ đồ luồng
 ```
-[Webhook: POST /webhook/new-signup]
+[Webhook: New User Signup]
          │
          ▼
-[Validate Signup Data]
-         │
-         ▼
-[Email #1: Welcome Email]
-  (Gửi ngay)
+[Send Welcome Email #1]
+  (Immediate)
          │
          ▼
 [Wait 2 Days]
          │
          ▼
-[Email #2: Getting Started]
-         │
-         ▼
-[Log to Google Sheets]
+[Send Getting Started #2]
          │
          ▼
 [Wait 3 Days]
          │
          ▼
-    IF: Opened Previous?
-    │          │
-    Yes        No
-    │          │
-    ▼          ▼
-[Email #3   [Email #2b:
- Advanced]   Reminder]
-         │         │
-         └────┬────┘
-              ▼
-   [Return Success Response]
+[IF: Opened Previous?]
+    │ yes        │ no
+    ▼            ▼
+[Send        [Resend #2b
+Advanced     (Different
+Tips #3]      subject)]
+    │            │
+    └─────┬──────┘
+          ▼
+   [Wait 5 Days]
+          │
+          ▼
+   [Send Offer #4]
+          │
+          ▼
+   [Log to Google Sheets]
 ```
 
 ## Nodes chi tiết
 
 | Node | Type | Configuration | Credentials |
 |------|------|---------------|-------------|
-| Webhook (New Signup) | Webhook | POST /webhook/new-signup | None |
-| Validate Signup Data | Code | Email/name validation | None |
-| Email #1: Welcome | Gmail | Welcome template | Gmail OAuth2 |
-| Wait 2 Days | Wait | 2 days delay | None |
-| Email #2: Getting Started | Gmail | Guide template | Gmail OAuth2 |
-| Log Email #2 | Google Sheets | Append row | Google Sheets OAuth2 |
-| Wait 3 Days | Wait | 3 days delay | None |
-| IF: Opened? | IF | Check opens_tracked flag | None |
-| Email #3: Advanced Tips | Gmail | Advanced template | Gmail OAuth2 |
-| Email #2b: Reminder | Gmail | Reminder template | Gmail OAuth2 |
+| Webhook (New Signup) | Webhook | POST /webhook/new-user | None |
+| Send Welcome #1 | Gmail/SendGrid | Welcome template | Gmail OAuth2 |
+| Wait 2 Days | Wait | 2 days | None |
+| Send Getting Started #2 | Gmail/SendGrid | Guide template | Gmail OAuth2 |
+| Wait 3 Days | Wait | 3 days | None |
+| Check Email Open | Code/Webhook | Track open event | None |
+| IF: Opened? | IF | Check open flag | None |
+| Send Advanced Tips #3 | Gmail/SendGrid | Tips template | Gmail OAuth2 |
+| Resend #2b | Gmail/SendGrid | Alternative subject | Gmail OAuth2 |
+| Wait 5 Days | Wait | 5 days | None |
+| Send Special Offer #4 | Gmail/SendGrid | Offer template | Gmail OAuth2 |
+| Log to Sheets | Google Sheets | Campaign tracking | Google Sheets OAuth2 |
 
 ## Cài đặt
 
-### Bước 1: Cấu hình Webhook
+### Bước 1: Tạo Google Sheets Campaign Tracker
 
-**Webhook URL:** `https://your-n8n-domain.com/webhook/new-signup`
+| email | user_id | step_1_sent | step_2_sent | step_3_sent | step_4_sent | opened | converted |
+|-------|---------|-------------|-------------|-------------|-------------|--------|-----------|
+| user@email.com | 123 | 2026-05-05 | 2026-05-07 | 2026-05-10 | | true | false |
 
-**Request format:**
-```bash
-curl -X POST https://your-n8n.com/webhook/new-signup \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Nguyễn Văn A",
-    "email": "nguyenvana@email.com",
-    "source": "Website"
-  }'
-```
-
-### Bước 2: Chuẩn bị Google Sheets
-
-Tạo Google Sheet để track campaign performance:
-
-| email | name | campaign_id | email_number | sent_at | status | opened |
-|-------|------|-------------|--------------|---------|--------|--------|
-| a@email.com | Nguyễn A | CAMP-123 | 2 | 2026-05-07 | sent | false |
-
-### Bước 3: Cấu hình Credentials
+### Bước 2: Cấu hình Credentials
 
 | Credential | Hướng dẫn |
 |-----------|-----------|
-| **Gmail OAuth2** | Settings → Credentials → Add → Gmail OAuth2 → Connect |
+| **Gmail OAuth2** | Settings → Credentials → Add → Gmail → Connect |
 | **Google Sheets OAuth2** | Settings → Credentials → Add → Google Sheets → Connect |
 
-### Bước 4: Import Workflow
+### Bước 3: Import Workflow
 
 1. Mở n8n Dashboard
 2. **Add Workflow** → **Import from File**
 3. Chọn: `workflows/enterprise/02-email-campaign/workflow.json`
 4. Click **Import**
 
-### Bước 5: Customize Email Templates
+### Bước 4: Customize Email Templates
 
-**Mở từng Email node và thay thế:**
+**Email #1: Welcome**
+```
+Subject: Chào mừng bạn đến với [Product]! 👋
 
-**1. Email #1: Welcome Email**
-- Replace `[Product]` bằng tên sản phẩm của bạn
-- Customize 3 bước khởi động
-- Thêm link video hướng dẫn
+Body:
+Chào {{ $json.name }},
 
-**2. Email #2: Getting Started**
-- Customize 3 tính năng chính
-- Thêm link tài liệu và cộng đồng
+Cảm ơn bạn đã đăng ký! Chúng tôi rất vui khi có bạn ở đây.
 
-**3. Email #3: Advanced Tips**
-- Customize mẹo nâng cao
-- Thêm link tutorials
+Bắt đầu ngay:
+1. Hoàn thành profile
+2. Kết nối integration đầu tiên
+3. Tạo workflow đầu tiên
 
-**4. Email #2b: Reminder**
-- Customize message nhẹ nhàng
-- Thêm contact info
+Cần hỗ trợ? Reply email này nhé!
 
-### Bước 6: Cấu hình Log to Google Sheets
-
-- Mở node "Log Email #2 Sent"
-- Set **Document ID** = Sheet ID
-- Set **Sheet Name** = tên sheet
-
-### Bước 7: Test
-
-1. Gửi test request qua curl hoặc Postman
-2. Kiểm tra:
-   - ✅ Email #1 có đến ngay không?
-   - ✅ Wait node có hoạt động không? (cần workflow Active)
-   - ✅ Email #2 có gửi sau 2 ngày không?
-   - ✅ Google Sheets có log không?
-3. Test conditional logic:
-   - Set `opens_tracked = true` → Kiểm tra Email #3
-   - Set `opens_tracked = false` → Kiểm tra Email #2b
-
-## Email Templates
-
-### Email #1: Welcome (Immediate)
-**Subject:** `Chào mừng {name} đến với [Product]! 👋`
-
-**Nội dung:**
-- Chào mừng
-- 3 bước khởi động
-- Link video hướng dẫn
-- Contact info
-
-### Email #2: Getting Started (Day 2)
-**Subject:** `Hướng dẫn bắt đầu với [Product] 🚀`
-
-**Nội dung:**
-- 3 tính năng chính
-- Link tài liệu chi tiết
-- Link cộng đồng
-
-### Email #3: Advanced Tips (Day 5, if opened)
-**Subject:** `Mẹo nâng cao để tối ưu [Product] 💡`
-
-**Nội dung:**
-- Mẹo sử dụng nâng cao
-- Link tutorials
-- Khuyến khích khám phá
-
-### Email #2b: Reminder (Day 5, if not opened)
-**Subject:** `Bạn có cần hỗ trợ gì không? 🤔`
-
-**Nội dung:**
-- Nhắc nhở nhẹ nhàng
-- Contact options
-- Encouragement
-
-## Tracking Email Opens
-
-### Method 1: Webhook-based Tracking
-Thêm tracking pixel vào email:
-```html
-<img src="https://your-n8n.com/webhook/email-opened?campaign_id={{campaign_id}}" width="1" height="1">
+Trân trọng,
+Team [Product]
 ```
 
-Tạo workflow riêng nhận webhook và update `opens_tracked` flag trong Google Sheets.
-
-### Method 2: Link Tracking
-Track khi user click links trong email:
+**Email #2: Getting Started**
 ```
-Redirect link: https://your-n8n.com/webhook/link-click?url={original_url}&campaign_id={id}
+Subject: Hướng dẫn bắt đầu 🚀
 ```
 
-## Troubleshooting
+**Email #3: Advanced Tips**
+```
+Subject: Mẹo nâng cao bạn nên biết 💡
+```
 
-| Lỗi | Nguyên nhân | Giải pháp |
-|-----|------------|-----------|
-| Webhook 404 | URL sai hoặc workflow chưa active | Kiểm tra URL và bật workflow |
-| Email không gửi được | Gmail credential invalid | Reconnect Gmail OAuth2 |
-| Wait node không hoạt động | Workflow chưa Active | Activate workflow (toggle Active) |
-| Google Sheets error | Sheet ID sai | Kiểm tra Sheet ID và permissions |
-| Conditional logic sai | opens_tracked flag không được update | Implement email open tracking |
+**Email #4: Special Offer**
+```
+Subject: Ưu đãi đặc biệt dành cho bạn 🎁
+```
+
+### Bước 5: Test
+
+**Test bằng curl:**
+```bash
+curl -X POST https://your-n8n.com/webhook/new-user \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test@email.com",
+    "name": "Nguyễn Văn A"
+  }'
+```
+
+**Kiểm tra:**
+1. ✅ Email #1 gửi ngay lập tức?
+2. ✅ Email #2 gửi sau 2 ngày? (hoặc dùng Test mode để skip wait)
+3. ✅ Tracking log vào Sheets?
 
 ## ⚠️ Lưu ý Community Version
 
-- ✅ **Webhook node** hoạt động tốt
+- ✅ **Wait nodes** hoạt động tốt trong community
 - ✅ **Gmail node** có sẵn
-- ✅ **Wait nodes** hoạt động tốt (cần workflow Active)
-- ⚠️ **Queue mode không available** — wait nodes có thể không chính xác nếu server restart
-- ⚠️ **Email open tracking** cần custom implementation (webhook + tracking pixel)
-- 💡 **Tip**: Dùng Google Sheets để track campaign performance và open rates
+- ⚠️ **Workflow phải Active** để wait nodes hoạt động
+- ⚠️ **Test mode** sẽ skip wait nodes (dùng để test nhanh)
+- 💡 **Tip**: Dùng SendGrid node thay Gmail để có tracking opens/clicks
 
 ## Mở rộng
 
-### Thêm A/B Testing
-Test nhiều subject lines:
-```javascript
-const subjectA = "Chào mừng bạn! 👋";
-const subjectB = "Welcome aboard! 🎉";
-const variant = Math.random() > 0.5 ? 'A' : 'B';
-const subject = variant === 'A' ? subjectA : subjectB;
+### Thêm Email Open Tracking
+Dùng webhook tracking pixels:
+```
+Email contains tracking pixel → Webhook fires → Update Sheets
 ```
 
-### Thêm Re-engagement Campaign
-Cho users không active sau 30 ngày:
+### Thêm A/B Testing
+Split test email subjects:
 ```
-Schedule (weekly) → Query inactive users → Send re-engagement email
+IF user_id % 2 == 0 → Subject A
+ELSE → Subject B
 ```
 
 ### Thêm Unsubscribe Handling
-Tự động handle unsubscribe requests:
 ```
-Webhook (/unsubscribe) → Update Google Sheets (status = unsubscribed)
+Webhook /unsubscribe → Update Sheets (set unsubscribed = true)
 ```
 
-### Thêm Multi-language Support
-Hỗ trợ tiếng Anh và tiếng Việt:
+### Thêm Segmentation
+Phân loại users trước khi gửi:
 ```javascript
-const language = user.preferred_language || 'vi';
-const templates = {
-  vi: { welcome: "Chào mừng...", subject: "Chào mừng..." },
-  en: { welcome: "Welcome...", subject: "Welcome..." }
-};
-```
-
-### Integration với Website
-
-**HTML Form:**
-```html
-<form action="https://your-n8n.com/webhook/new-signup" method="POST">
-  <input type="text" name="name" required placeholder="Họ và tên">
-  <input type="email" name="email" required placeholder="Email">
-  <input type="hidden" name="source" value="Website Signup">
-  <button type="submit">Sign Up</button>
-</form>
+const segment = user.plan === 'premium' ? 'vip' : 'standard';
+// Send different content based on segment
 ```

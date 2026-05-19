@@ -1,0 +1,351 @@
+{
+  "name": "Enterprise: Social Media Posting",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "everyHour",
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (Hàng giờ)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "notes": "⚙️ Cấu hình: Kiểm tra mỗi giờ xem có bài nào cần đăng không. Có thể đổi thành every 30 phút."
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "read-calendar",
+      "name": "Read Content Calendar",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [500, 300],
+      "notes": "⚠️ Đọc Google Sheets content calendar. Columns: id, content, platform, scheduled_time, status, media_url, hashtags. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter posts due to publish\nconst posts = $input.all().map(item => item.json);\nconst now = new Date();\n\nconst duePosts = posts.filter(post => {\n  if (post.status !== 'scheduled') return false;\n  \n  const scheduledTime = new Date(post.scheduled_time);\n  const timeDiff = now - scheduledTime;\n  \n  // Post within last hour window\n  return timeDiff >= 0 && timeDiff <= 3600000;\n});\n\nconsole.log(`Found ${duePosts.length} posts due to publish`);\n\nreturn duePosts.map(post => ({\n  json: {\n    ...post,\n    publish_now: true,\n    current_time: now.toISOString()\n  }\n}));"
+      },
+      "id": "filter-due",
+      "name": "Filter Due Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Lọc các posts đến giờ đăng. Window 1 tiếng để tránh bỏ sót."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-posts",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "larger"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-posts",
+      "name": "IF: Has Posts to Publish?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "notes": "Nếu có posts cần đăng → tiếp tục. Nếu không → dừng."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format content for platform\nconst post = $input.first().json;\nconst platform = post.platform?.toLowerCase() || 'facebook';\n\nlet formattedContent = post.content || '';\nconst hashtags = post.hashtags || '';\n\n// Platform-specific formatting\nswitch(platform) {\n  case 'twitter':\n    // Twitter: 280 characters max\n    if (formattedContent.length > 250) {\n      formattedContent = formattedContent.substring(0, 247) + '...';\n    }\n    if (hashtags) {\n      const maxContentLength = 280 - hashtags.length - 2;\n      if (formattedContent.length > maxContentLength) {\n        formattedContent = formattedContent.substring(0, maxContentLength - 3) + '...';\n      }\n      formattedContent = formattedContent + '\\n\\n' + hashtags;\n    }\n    break;\n    \n  case 'linkedin':\n    // LinkedIn: 3000 characters max\n    if (formattedContent.length > 2900) {\n      formattedContent = formattedContent.substring(0, 2897) + '...';\n    }\n    if (hashtags) {\n      formattedContent = formattedContent + '\\n\\n' + hashtags;\n    }\n    // Add professional tone for LinkedIn\n    formattedContent = formattedContent.replace(/💰/g, '').replace(/🔥/g, '');\n    break;\n    \n  case 'facebook':\n    // Facebook: no strict limit, but keep it reasonable\n    if (formattedContent.length > 5000) {\n      formattedContent = formattedContent.substring(0, 4997) + '...';\n    }\n    if (hashtags) {\n      formattedContent = formattedContent + '\\n\\n' + hashtags;\n    }\n    break;\n    \n  case 'instagram':\n    // Instagram: 2200 characters max\n    if (formattedContent.length > 2100) {\n      formattedContent = formattedContent.substring(0, 2097) + '...';\n    }\n    if (hashtags) {\n      formattedContent = formattedContent + '\\n\\n' + hashtags;\n    }\n    break;\n}\n\nreturn [{\n  json: {\n    ...post,\n    formatted_content: formattedContent,\n    platform,\n    character_count: formattedContent.length\n  }\n}];"
+      },
+      "id": "format-content",
+      "name": "Format Content for Platform",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "notes": "Format content theo từng platform: Twitter 280 chars, LinkedIn 3000, Facebook 5000, Instagram 2200."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.twitter.com/2/tweets",
+        "authentication": "predefinedCredentialType",
+        "predefinedCredentialType": "twitterOAuth2API",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.formatted_content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "post-twitter",
+      "name": "Post to Twitter/X",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 100],
+      "notes": "⚠️ Đăng lên Twitter/X qua API v2. Cần Twitter OAuth2. Lưu ý: Twitter API có thể cần paid tier."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/ugcPosts",
+        "authentication": "predefinedCredentialType",
+        "predefinedCredentialType": "linkedInOAuth2API",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "author",
+              "value": "urn:li:person:YOUR_PERSON_URN"
+            },
+            {
+              "name": "lifecycleState",
+              "value": "PUBLISHED"
+            },
+            {
+              "name": "specificContent.contentEntities.0.entityLocation",
+              "value": ""
+            },
+            {
+              "name": "specificContent.contentEntities.0.description.text",
+              "value": "={{ $json.formatted_content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "post-linkedin",
+      "name": "Post to LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 300],
+      "notes": "⚠️ Đăng lên LinkedIn qua UGC API. Cần LinkedIn OAuth2 và person URN."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/YOUR_PAGE_ID/feed",
+        "authentication": "predefinedCredentialType",
+        "predefinedCredentialType": "facebookGraphApiOAuth2API",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "={{ $json.formatted_content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "post-facebook",
+      "name": "Post to Facebook Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 500],
+      "notes": "⚠️ Đăng lên Facebook Page qua Graph API. Cần Facebook OAuth2 và Page ID. Thay YOUR_PAGE_ID."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "id": "={{ $json.id }}",
+            "status": "published",
+            "published_at": "={{ $json.current_time }}"
+          }
+        },
+        "options": {
+          "idColumn": "id"
+        }
+      },
+      "id": "update-status",
+      "name": "Update Status to Published",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1750, 300],
+      "notes": "⚠️ Cập nhật status thành 'published' và lưu published_at. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "✅ Đã đăng bài thành công!\n\nPlatform: {{ $json.platform }}\nContent: {{ $json.formatted_content.substring(0, 100) }}...\nTime: {{ $json.current_time }}",
+        "additionalFields": {}
+      },
+      "id": "notify-telegram",
+      "name": "Notify via Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [2000, 300],
+      "notes": "⚠️ Gửi notification sau khi đăng thành công. Cần Telegram bot token và chat_id."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Hàng giờ)": {
+      "main": [
+        [
+          {
+            "node": "Read Content Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Content Calendar": {
+      "main": [
+        [
+          {
+            "node": "Filter Due Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Due Posts": {
+      "main": [
+        [
+          {
+            "node": "IF: Has Posts to Publish?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Has Posts to Publish?": {
+      "main": [
+        [
+          {
+            "node": "Format Content for Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Content for Platform": {
+      "main": [
+        [
+          {
+            "node": "Post to Twitter/X",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Post to LinkedIn",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Post to Facebook Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Twitter/X": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Facebook Page": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Status to Published": {
+      "main": [
+        [
+          {
+            "node": "Notify via Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["enterprise", "social-media", "posting", "automation", "content"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-workflow"
+  }
+}

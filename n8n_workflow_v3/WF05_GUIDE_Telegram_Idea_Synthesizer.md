@@ -184,6 +184,7 @@ dựa trên điểm yếu của từng người.
 | Timestamp | `2026-05-13 20:15:00` | Thời gian nhận |
 | Date | `13/05/2026` | Ngày (dễ filter) |
 | Username | `@john_doe` | Telegram username |
+| User Name | `John Doe` | Tên hiển thị của user |
 | Original Idea | `Mở cà phê...` | Nội dung gốc |
 | Category | `Kinh doanh` | AI phân loại |
 | Summary | `Chuỗi cà phê kết hợp...` | Tóm tắt AI |

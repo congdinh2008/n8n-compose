@@ -1,0 +1,177 @@
+{
+  "name": "Gmail → Telegram Daily Report (V2 Standard)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "triggerAtHour": 7, "triggerAtMinute": 0 }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "⏰ Trigger 7h Sáng",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 400],
+      "notes": "Chạy lúc 7:00 sáng hàng ngày. Timezone: Asia/Ho_Chi_Minh."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 100,
+        "filters": { "q": "is:unread newer_than:1d" },
+        "options": {}
+      },
+      "id": "gmail-get",
+      "name": "📬 Lấy Email (100 mới nhất)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [480, 400],
+      "credentials": {
+        "gmailOAuth2": { "id": "REPLACE_GMAIL_CRED_ID", "name": "Gmail OAuth2" }
+      },
+      "notes": "⚠️ Cần Gmail OAuth2. Lấy tối đa 100 emails unread 24h qua."
+    },
+    {
+      "parameters": {
+        "jsCode": "// V2: Phân loại email theo categories\nconst emails = $input.all();\nconst VIP_SENDERS = [\n  'boss@company.com', 'manager@company.com', 'ceo@company.com'\n];\nconst SPAM_DOMAINS = [\n  'shopee.vn', 'lazada.vn', 'tiki.vn', 'grab.com', 'newsletters.',\n  'noreply@', 'no-reply@', 'donotreply@'\n];\nconst PROMO_KEYWORDS = [\n  'giảm giá', 'flash sale', 'khuyến mãi', 'ưu đãi', 'sale', 'discount',\n  '% off', 'free', 'miễn phí', 'deal', 'voucher', 'coupon'\n];\nconst NEWSLETTER_KEYWORDS = [\n  'unsubscribe', 'newsletter', 'digest', 'weekly', 'monthly', 'bản tin',\n  'no-reply', 'noreply'\n];\nconst URGENT_KEYWORDS = [\n  'urgent', 'khẩn', 'gấp', 'asap', 'deadline', 'hạn chót', 'cảnh báo',\n  'warning', 'payment due', 'overdue', 'quá hạn', 'cần phản hồi'\n];\n\nconst categories = { important: [], normal: [], newsletter: [], promotion: [], spam: [] };\n\nemails.forEach(item => {\n  const e = item.json;\n  const from = (e.from || '').toLowerCase();\n  const subject = (e.subject || '').toLowerCase();\n  const body = (e.textPlain || e.snippet || '').toLowerCase();\n  const full = `${from} ${subject} ${body}`;\n\n  const isVIP = VIP_SENDERS.some(s => from.includes(s.toLowerCase()));\n  const isSpamDomain = SPAM_DOMAINS.some(d => from.includes(d));\n  const isPromo = PROMO_KEYWORDS.some(kw => full.includes(kw));\n  const isNewsletter = NEWSLETTER_KEYWORDS.some(kw => full.includes(kw));\n  const isUrgent = URGENT_KEYWORDS.some(kw => full.includes(kw));\n\n  const fromClean = (e.from || '').replace(/<[^>]+>/g, '').trim();\n  const info = { id: e.id, from: fromClean, subject: e.subject || '(no subject)' };\n\n  if (isVIP || isUrgent) categories.important.push(info);\n  else if (isSpamDomain && !isUrgent) categories.spam.push(info);\n  else if (isPromo) categories.promotion.push(info);\n  else if (isNewsletter) categories.newsletter.push(info);\n  else categories.normal.push(info);\n});\n\nreturn [{ json: { categories, total: emails.length } }];"
+      },
+      "id": "classify-emails",
+      "name": "🏷️ Phân Loại Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 400],
+      "notes": "Phân loại vào 5 nhóm: Important, Normal, Newsletter, Promotion, Spam. Dựa trên keyword list tiếng Việt."
+    },
+    {
+      "parameters": {
+        "jsCode": "const { categories, total } = $input.first().json;\n\nconst dateStr = new Date().toLocaleDateString('vi-VN', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  timeZone: 'Asia/Ho_Chi_Minh'\n});\n\nconst fmt = (arr, max = 5) => arr.length === 0 ? '_Không có_' :\n  arr.slice(0, max).map((e, i) => `  ${i+1}. *${(e.subject||'').substring(0,50)}*\\n     📤 ${(e.from||'').substring(0,40)}`).join('\\n') +\n  (arr.length > max ? `\\n  _... và ${arr.length - max} email khác_` : '');\n\nconst spamIds = categories.spam.map(e => e.id).filter(Boolean);\n\nconst message = `📧 *BÁO CÁO EMAIL SÁNG NAY*\n📅 ${dateStr}\n\n📊 *Thống kê:*\n• ⭐ Quan trọng: ${categories.important.length}\n• 📥 Bình thường: ${categories.normal.length}\n• 📰 Newsletter: ${categories.newsletter.length}\n• 🏷️ Khuyến mãi: ${categories.promotion.length}\n• 🗑️ Spam/Quảng cáo: ${categories.spam.length}\n• 📨 Tổng cộng: *${total} email*\n\n⭐ *QUAN TRỌNG - Cần xử lý:*\n${fmt(categories.important)}\n\n📥 *BÌNH THƯỜNG:*\n${fmt(categories.normal)}\n\n🔔 _Tự động dọn ${categories.spam.length} email spam sau_`;\n\nreturn [{ json: { message, spamIds, stats: { total, ...Object.fromEntries(Object.entries(categories).map(([k,v]) => [k, v.length])) } } }];"
+      },
+      "id": "format-report",
+      "name": "📊 Tạo Báo Cáo Chi Tiết",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 400],
+      "notes": "Format báo cáo với thống kê theo từng nhóm. Kèm danh sách email quan trọng cần xử lý ngay."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "send-telegram",
+      "name": "📱 Gửi Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1200, 250],
+      "credentials": {
+        "telegramApi": { "id": "REPLACE_TELEGRAM_CRED_ID", "name": "Telegram Bot" }
+      },
+      "notes": "Gửi báo cáo lên Telegram."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [{
+            "id": "has-spam",
+            "leftValue": "={{ $json.spamIds.length }}",
+            "rightValue": 0,
+            "operator": { "type": "number", "operation": "gt" }
+          }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-spam",
+      "name": "IF: Có Email Rác?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1200, 550],
+      "notes": "Nếu có email spam → tiến hành archive/trash tự động."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Archive từng email spam\nconst spamIds = $('📊 Tạo Báo Cáo Chi Tiết').first().json.spamIds || [];\n\nif (spamIds.length === 0) {\n  return [{ json: { archived: 0, message: 'Không có spam để xóa' } }];\n}\n\n// Trả về từng ID để Gmail node xử lý tuần tự\nreturn spamIds.map(id => ({ json: { emailId: id } }));"
+      },
+      "id": "prepare-spam-ids",
+      "name": "🗂️ Chuẩn Bị Danh Sách Spam",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 650],
+      "notes": "Tạo danh sách email ID spam để archive từng cái."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "trash",
+        "messageId": "={{ $json.emailId }}",
+        "options": {}
+      },
+      "id": "trash-spam",
+      "name": "🗑️ Xóa Email Spam",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1680, 650],
+      "credentials": {
+        "gmailOAuth2": { "id": "REPLACE_GMAIL_CRED_ID", "name": "Gmail OAuth2" }
+      },
+      "notes": "⚠️ Di chuyển email spam vào Thùng rác. Email sẽ bị xóa vĩnh viễn sau 30 ngày. Cần cẩn thận với filter!"
+    },
+    {
+      "parameters": {
+        "jsCode": "const trashed = $input.all().length;\nconst stats = $('📊 Tạo Báo Cáo Chi Tiết').first().json.stats;\n\nconsole.log(`✅ Workflow hoàn tất: ${JSON.stringify(stats)}`);\nconsole.log(`🗑️ Đã xóa ${trashed} email spam`);\n\nreturn [{ json: { status: 'completed', trashed, stats, finished_at: new Date().toISOString() } }];"
+      },
+      "id": "log-done",
+      "name": "✅ Ghi Log Hoàn Tất",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 650],
+      "notes": "Ghi log kết quả để theo dõi trong Execution history."
+    }
+  ],
+  "connections": {
+    "⏰ Trigger 7h Sáng": { "main": [[{ "node": "📬 Lấy Email (100 mới nhất)", "type": "main", "index": 0 }]] },
+    "📬 Lấy Email (100 mới nhất)": { "main": [[{ "node": "🏷️ Phân Loại Email", "type": "main", "index": 0 }]] },
+    "🏷️ Phân Loại Email": { "main": [[{ "node": "📊 Tạo Báo Cáo Chi Tiết", "type": "main", "index": 0 }]] },
+    "📊 Tạo Báo Cáo Chi Tiết": {
+      "main": [
+        [{ "node": "📱 Gửi Telegram", "type": "main", "index": 0 }],
+        [{ "node": "IF: Có Email Rác?", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: Có Email Rác?": {
+      "main": [
+        [{ "node": "🗂️ Chuẩn Bị Danh Sách Spam", "type": "main", "index": 0 }],
+        [{ "node": "✅ Ghi Log Hoàn Tất", "type": "main", "index": 0 }]
+      ]
+    },
+    "🗂️ Chuẩn Bị Danh Sách Spam": { "main": [[{ "node": "🗑️ Xóa Email Spam", "type": "main", "index": 0 }]] },
+    "🗑️ Xóa Email Spam": { "main": [[{ "node": "✅ Ghi Log Hoàn Tất", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {
+    "📬 Lấy Email (100 mới nhất)": [
+      { "json": { "id": "demo-1", "from": "Boss <boss@company.com>", "subject": "Q2 Report - Cần review trước 5pm", "date": "2026-05-11T06:30:00Z", "textPlain": "Hi team, cần review Q2 report." } },
+      { "json": { "id": "demo-2", "from": "Client <client@startup.vn>", "subject": "Proposal - cần phản hồi gấp hôm nay", "date": "2026-05-11T06:00:00Z", "textPlain": "Bên mình cần phản hồi gấp về proposal." } },
+      { "json": { "id": "demo-3", "from": "Medium Daily <newsletter@medium.com>", "subject": "Daily Digest: Top stories for you", "date": "2026-05-11T05:00:00Z", "textPlain": "Unsubscribe from this newsletter." } },
+      { "json": { "id": "demo-4", "from": "Shopee <noreply@deals.shopee.vn>", "subject": "🔥 Flash Sale 50% - Chỉ còn 2h!", "date": "2026-05-11T04:00:00Z", "textPlain": "Giảm giá sốc 50% cho hàng nghìn sản phẩm!" } },
+      { "json": { "id": "demo-5", "from": "GitHub <no-reply@github.com>", "subject": "Your PR has been merged", "date": "2026-05-11T03:00:00Z", "textPlain": "Pull request merged successfully." } },
+      { "json": { "id": "demo-6", "from": "Lazada <promo@lazada.vn>", "subject": "Ưu đãi VIP - Giảm thêm 30%!", "date": "2026-05-11T02:00:00Z", "textPlain": "Voucher giảm giá 30% cho thành viên VIP." } }
+    ]
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "tags": ["personal", "gmail", "telegram", "daily-report", "v2-standard", "spam-cleanup"],
+  "meta": {
+    "usage": "V2 STANDARD: 8 nodes. Phân loại email + báo cáo chi tiết + tự động dọn spam.",
+    "difficulty": "⭐⭐ Intermediate",
+    "nodes_count": 8,
+    "setup_time": "30 phút"
+  }
+}

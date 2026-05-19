@@ -1,86 +1,95 @@
-# 📋 Personal: Content Scheduler
+# 📅 Personal: Content Scheduler
 
 ## Mục tiêu
-Tự động hóa **lên lịch và đăng bài** lên mạng xã hội:
+Tự động **đăng bài lên social media** theo lịch đã lên sẵn trong Google Sheets:
 - Đọc content calendar từ Google Sheets
-- Lọc posts đã đến giờ đăng
-- Format content cho từng platform (Twitter, LinkedIn)
+- Kiểm tra bài nào đến giờ đăng
+- Format phù hợp cho từng platform (Twitter, LinkedIn, Facebook)
 - Đăng bài tự động
-- Update status trong Google Sheets
+- Update status và notify
 
 ## Đối tượng sử dụng
-**Cá nhân & Doanh nghiệp** - Social media managers, content creators, marketing teams.
+**Cá nhân & Businesses** - Social media managers, content creators, marketers.
 
 ## Sơ đồ luồng
 ```
-[Schedule Trigger (Check Hourly)]
+[Schedule Trigger - Hourly Check]
          │
          ▼
-[Read Content Calendar (Google Sheets)]
+[Read Content Calendar]
+  (Google Sheets)
          │
          ▼
-[Filter Due Posts (scheduled_time <= now)]
+[Filter Due Posts]
+  (Scheduled time reached)
+         │
+    ┌────┴────┐
+    ▼         ▼
+[IF: Has Posts?]
+    │ yes     │ no
+    ▼         ▼
+[Switch: Platform?]  [Stop]
+    │
+    ├─ Twitter → Post to Twitter
+    ├─ LinkedIn → Post to LinkedIn
+    └─ Facebook → Post to Facebook
          │
          ▼
-[IF: Has Posts to Publish?]
-    │ true
-    ├──────────────┐
-    ▼              ▼
-[IF: Twitter?]  [IF: LinkedIn?]
-    │              │
-    ▼              ▼
-[Format        [Format
- Twitter]      LinkedIn]
-    │              │
-    ▼              ▼
-[Post to       [Post to
- Twitter/X]    LinkedIn]
-    │              │
-    └──────┬───────┘
-           ▼
-[Update Google Sheets (Published)]
+[Update Status to Published]
+         │
+         ▼
+[Notify via Telegram]
 ```
 
 ## Nodes chi tiết
 
 | Node | Type | Configuration | Credentials |
 |------|------|---------------|-------------|
-| Schedule Trigger | Schedule | Check hourly | None |
-| Read Content Calendar | Google Sheets | Read approved posts | Google Sheets OAuth2 |
-| Filter Due Posts | Code | Filter by scheduled_time | None |
-| IF: Has Posts? | IF | Check count > 0 | None |
-| IF: Twitter/LinkedIn | IF | Route by platform | None |
-| Format Twitter | Code | Max 280 chars, hashtags | None |
-| Format LinkedIn | Code | Professional format | None |
-| Post to Twitter/X | Twitter | Post tweet | Twitter OAuth2 |
-| Post to LinkedIn | LinkedIn | Post update | LinkedIn OAuth2 |
-| Update Google Sheets | Google Sheets | Update status | Google Sheets OAuth2 |
+| Schedule Trigger | Schedule | Every hour | None |
+| Read Content Calendar | Google Sheets | Read all rows | Google Sheets OAuth2 |
+| Filter Due Posts | Code | Time comparison | None |
+| IF: Has Posts? | IF | count > 0 | None |
+| Switch: Platform? | Switch | Route by platform | None |
+| Post to Twitter | Twitter | Post tweet | Twitter API |
+| Post to LinkedIn | LinkedIn | Post article | LinkedIn OAuth2 |
+| Post to Facebook | Facebook | Post to page | Facebook Graph API |
+| Update Status | Google Sheets | Update row | Google Sheets OAuth2 |
+| Notify via Telegram | Telegram | Success message | Telegram Bot Token |
 
 ## Cài đặt
 
-### Bước 1: Chuẩn bị Google Sheets Content Calendar
+### Bước 1: Tạo Google Sheets Content Calendar
 
-Tạo Google Sheet với các columns:
+| id | content | platform | scheduled_time | status | media_url |
+|----|---------|----------|----------------|--------|-----------|
+| 1 | Chúc buổi sáng tốt lành! #motivation | Facebook | 2026-05-05T08:00:00 | scheduled | |
+| 2 | New blog post about AI trends | LinkedIn | 2026-05-05T10:00:00 | scheduled | https://... |
+| 3 | Tips for productivity 🚀 | Twitter | 2026-05-05T14:00:00 | scheduled | |
 
-| platform | content | media_url | scheduled_time | status | hashtags | post_url | published_at |
-|----------|---------|-----------|----------------|--------|----------|----------|--------------|
-| Twitter | Content here... | https://img.url | 2026-05-05 10:00 | approved | #tech,#ai | | |
-| LinkedIn | Content here... | https://img.url | 2026-05-05 14:00 | approved | #business | | |
+**Notes:**
+- `id`: Unique identifier cho mỗi post
+- `content`: Nội dung bài đăng
+- `platform`: `twitter`, `linkedin`, hoặc `facebook`
+- `scheduled_time`: ISO format datetime
+- `status`: `scheduled`, `published`, hoặc `failed`
+- `media_url`: URL của image/video (optional)
 
-**Status values:**
-- `draft` - Đang soạn, chưa đăng
-- `review` - Đang chờ duyệt
-- `approved` - Đã duyệt, chờ đăng
-- `published` - Đã đăng
-- `failed` - Lỗi khi đăng
+**Lấy Sheet ID:**
+```
+URL: https://docs.google.com/spreadsheets/d/SHEET_ID/edit
+                                                   ↑
+                                         Copy phần này
+```
 
-### Bước 2: Cấu hình Credentials
+### Bước 2: Chuẩn bị Credentials
 
 | Credential | Hướng dẫn |
 |-----------|-----------|
 | **Google Sheets OAuth2** | Settings → Credentials → Add → Google Sheets → Connect |
-| **Twitter OAuth2** | Settings → Credentials → Add → Twitter → Connect |
-| **LinkedIn OAuth2** | Settings → Credentials → Add → LinkedIn → Connect |
+| **Twitter API** | https://developer.twitter.com/en/portal - Cần bearer token |
+| **LinkedIn OAuth2** | https://developer.linkedin.com/ - Cần app credentials |
+| **Facebook Graph API** | https://developers.facebook.com/ - Cần Page access token |
+| **Telegram Bot** (Optional) | @BotFather → Create bot → Copy token |
 
 ### Bước 3: Import Workflow
 
@@ -89,100 +98,103 @@ Tạo Google Sheet với các columns:
 3. Chọn: `workflows/personal/05-content-scheduler/workflow.json`
 4. Click **Import**
 
-### Bước 4: Cấu hình Nodes
+### Bước 4: Cấu hình
 
 **1. Schedule Trigger:**
-- Set để check hourly hoặc every 30 minutes tùy nhu cầu
+- Set **Rule**: `everyHour`
+- Set **triggerAtMinute**: `0`
+- Kiểm tra mỗi giờ xem có post nào cần đăng
 
 **2. Read Content Calendar:**
 - Set **Document ID** = Sheet ID
 - Set **Sheet Name** = tên sheet
-- Filter: status = 'approved'
 
-**3. Format Twitter/LinkedIn:**
-- Review và customize formatting logic
-- Twitter: max 280 chars
-- LinkedIn: professional tone, line breaks
+**3. Platform Nodes:**
+- **Twitter:** Gán Twitter API credentials
+- **LinkedIn:** Gán LinkedIn OAuth2
+- **Facebook:** Gán Facebook Graph API credentials
+- **Hoặc xóa nodes không dùng**
 
-**4. Post to Platforms:**
-- Verify credentials đã được gán
-- Test với 1 post trước khi schedule thật
-
-**5. Update Google Sheets:**
+**4. Update Status:**
 - Set **Document ID** = Sheet ID
 - Set **Sheet Name** = tên sheet
-- Update status = 'published', published_at = now
+
+**5. Notify via Telegram:**
+- Set **Chat ID** = chat ID của bạn
+- Gán Telegram credential
 
 ### Bước 5: Test
 
-**1. Thêm post test vào Google Sheets:**
-```
-platform: Twitter
-content: Test post từ n8n automation
-scheduled_time: 2026-05-05 10:00 (thời gian trong quá khứ)
-status: approved
-hashtags: test,automation
-```
+1. Thêm row mới vào Google Sheets với `scheduled_time` = 1 tiếng trước
+2. Set `status` = `scheduled`
+3. Click **Test Workflow**
+4. Kiểm tra:
+   - ✅ Bài đăng được filter đúng không?
+   - ✅ Post lên platform thành công không?
+   - ✅ Status được update thành `published`?
+   - ✅ Telegram notification có đến không?
+5. Nếu OK → **Activate** workflow
 
-**2. Chạy workflow:**
-- Click **Test Workflow** hoặc đợi schedule trigger
+## Platform-Specific Formatting
 
-**3. Kiểm tra:**
-- ✅ Post đã lên Twitter/LinkedIn chưa?
-- ✅ Google Sheets đã update status?
-- ✅ Format content đúng không?
+### Twitter/X
+- Max 280 characters
+- Include hashtags
+- Media: max 4 images
+
+### LinkedIn
+- Professional tone
+- Longer content OK (up to 3,000 characters)
+- Include relevant hashtags
+
+### Facebook
+- Conversational tone
+- Can include links
+- Media: images, videos
 
 ## Troubleshooting
 
 | Lỗi | Nguyên nhân | Giải pháp |
 |-----|------------|-----------|
-| Không có posts nào | scheduled_time chưa đến hoặc status khác 'approved' | Kiểm tra sheet data |
-| Twitter post fail | Character limit vượt 280 | Kiểm tra Format Twitter node |
-| Credential expired | OAuth2 token hết hạn | Reconnect credentials |
-| Post bị duplicate | Schedule chạy quá nhanh | Tăng interval hoặc add unique check |
+| Không đọc được Sheet | Sheet ID sai | Kiểm tra lại URL |
+| Post không đăng | API credentials sai | Reconnect credentials |
+| Status không update | Sheet ID sai hoặc id không khớp | Kiểm tra column mapping |
+| Telegram không gửi | Bot token/chat_id sai | Kiểm tra credentials |
 
 ## ⚠️ Lưu ý Community Version
 
-- ✅ **Twitter/LinkedIn nodes** có sẵn
-- ✅ **Google Sheets node** hoạt động tốt
-- ⚠️ **OAuth2 credentials** cần reconnect định kỳ
-- ⚠️ **Twitter API v2** có rate limits (300 requests/15min)
-- 💡 **Tip**: Có thể dùng HTTP Request node thay cho Twitter/LinkedIn nodes nếu cần custom behavior
+- ✅ **Google Sheets node** có sẵn, hoạt động tốt
+- ✅ **Schedule trigger** hoạt động tốt
+- ⚠️ **Twitter API** có thể cần paid tier cho full access
+- ⚠️ **LinkedIn/Facebook APIs** cần app approval
+- 💡 **Tip**: Bắt đầu với 1 platform trước, test kỹ, sau đó thêm platforms khác
 
 ## Mở rộng
 
-### Thêm Facebook/Instagram
-Thêm branches cho các platforms khác:
+### Thêm AI Content Generation
+Tự động tạo content:
 ```
-IF: Facebook? → Format Facebook → Post to Facebook
-IF: Instagram? → Format Instagram → Post to Instagram
+Schedule → OpenAI (Generate post based on topic) → Add to Sheet → Post
 ```
 
-### Thêm Content Approval Workflow
-Tạo workflow riêng để approve content:
+### Thêm Best Time Posting
+Đăng vào giờ optimal:
+```javascript
+const bestTimes = {
+  twitter: ['9:00', '12:00', '17:00'],
+  linkedin: ['8:00', '12:00', '17:00'],
+  facebook: ['13:00', '15:00', '19:00']
+};
 ```
-New Row in Sheets → Notify Manager (Slack)
-                         │
-                         ▼
-                    Manager approves
-                         │
-                         ▼
-                    Update status = 'approved'
+
+### Thêm Hashtag Suggestions
+AI đề xuất hashtags:
+```
+Content → OpenAI (Suggest hashtags) → Append to content → Post
 ```
 
 ### Thêm Analytics Tracking
-Track engagement sau khi post:
+Theo dõi performance:
 ```
-Schedule (daily) → Fetch Twitter Analytics
-                        → Fetch LinkedIn Analytics
-                        → Update Sheet với metrics
-```
-
-### Thêm AI Content Generation
-Dùng AI để tạo content tự động:
-```
-Schedule (weekly) → AI Generate Content Ideas
-                          │
-                          ▼
-                     Add to Sheet as 'draft'
+Schedule (weekly) → Fetch post metrics → Update Sheet with engagement data
 ```

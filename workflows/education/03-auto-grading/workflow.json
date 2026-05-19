@@ -3,83 +3,42 @@
   "nodes": [
     {
       "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
         "options": {}
       },
       "id": "sheets-trigger",
-      "name": "Google Sheets Trigger (Bài nộp mới)",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.4,
+      "name": "Google Sheets Trigger (New Submission)",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
       "position": [250, 300],
-      "notes": "⚙️ Trigger khi có bài nộp mới trong Google Sheets. Columns: student_name, student_email, answers, submission_date. Cần Sheet ID."
+      "notes": "⚠️ Trigger khi có bài làm mới được submit vào Google Sheets. Cần Sheet ID của sheet chứa bài làm của học viên."
     },
     {
       "parameters": {
-        "jsCode": "// Auto Grading - Chấm điểm tự động\n// So sánh answers của học sinh với answer key\n\nconst submission = $input.first().json;\n\n// Answer key - Có thể load từ sheet khác\nconst ANSWER_KEY = {\n  'Q1': 'A',\n  'Q2': 'C',\n  'Q3': 'B',\n  'Q4': 'D',\n  'Q5': 'A',\n  'Q6': 'C',\n  'Q7': 'B',\n  'Q8': 'D',\n  'Q9': 'A',\n  'Q10': 'C'\n};\n\nconst totalQuestions = Object.keys(ANSWER_KEY).length;\nconst pointsPerQuestion = 100 / totalQuestions;\n\n// Parse student answers (format: Q1:A,Q2:B,Q3:C,...)\nconst studentAnswers = {};\nif (submission.answers) {\n  const pairs = submission.answers.split(',');\n  pairs.forEach(pair => {\n    const [question, answer] = pair.trim().split(':');\n    studentAnswers[question] = answer?.trim();\n  });\n}\n\n// Grade each question\nlet correctCount = 0;\nconst grading = [];\n\nfor (const [question, correctAnswer] of Object.entries(ANSWER_KEY)) {\n  const studentAnswer = studentAnswers[question] || 'N/A';\n  const isCorrect = studentAnswer.toUpperCase() === correctAnswer.toUpperCase();\n  \n  if (isCorrect) correctCount++;\n  \n  grading.push({\n    question,\n    correct_answer: correctAnswer,\n    student_answer: studentAnswer,\n    is_correct: isCorrect\n  });\n}\n\nconst score = (correctCount / totalQuestions) * 100;\nconst grade = score >= 90 ? 'A' : \n              score >= 80 ? 'B' : \n              score >= 70 ? 'C' : \n              score >= 60 ? 'D' : 'F';\n\nconst passed = score >= 50;\n\nconsole.log(`Student: ${submission.student_name}`);\nconsole.log(`Score: ${score.toFixed(1)}% (${correctCount}/${totalQuestions})`);\nconsole.log(`Grade: ${grade}`);\n\nreturn [{\n  json: {\n    ...submission,\n    score: score.toFixed(1),\n    grade,\n    correct_count: correctCount,\n    total_questions: totalQuestions,\n    passed,\n    grading_details: grading,\n    graded_at: new Date().toISOString(),\n    timezone: 'Asia/Ho_Chi_Minh'\n  }\n}];"
+        "jsCode": "// Auto Grading System\nconst submission = $input.first().json;\n\n// Extract student info\nconst studentName = submission['Họ tên'] || submission['Tên'] || submission['name'] || 'Unknown';\nconst studentId = submission['Mã HS'] || submission['ID'] || submission['student_id'] || 'N/A';\nconst quizName = submission['Bài quiz'] || submission['Quiz'] || submission['quiz_name'] || 'Unknown';\n\n// Parse answers\nconst answers = {};\nfor (const [key, value] of Object.entries(submission)) {\n  if (key.startsWith('Câu') || key.startsWith('Q') || key.startsWith('Answer')) {\n    answers[key] = value?.toString().trim().toLowerCase() || '';\n  }\n}\n\n// Answer key (customize this for each quiz)\nconst answerKey = {\n  'Câu 1': 'a',\n  'Câu 2': 'b',\n  'Câu 3': 'c',\n  'Câu 4': 'd',\n  'Câu 5': 'a',\n  'Câu 6': 'b',\n  'Câu 7': 'c',\n  'Câu 8': 'a',\n  'Câu 9': 'd',\n  'Câu 10': 'b'\n};\n\n// Grade answers\nlet correct = 0;\nconst total = Object.keys(answerKey).length;\nconst results = [];\n\nfor (const [question, correctAnswer] of Object.entries(answerKey)) {\n  const studentAnswer = answers[question] || '';\n  const isCorrect = studentAnswer === correctAnswer.toLowerCase();\n  \n  if (isCorrect) correct++;\n  \n  results.push({\n    question,\n    correct_answer: correctAnswer,\n    student_answer: studentAnswer || '(không trả lời)',\n    is_correct: isCorrect\n  });\n}\n\nconst score = (correct / total) * 10;\nconst scoreRounded = Math.round(score * 100) / 100;\nconst percentage = (correct / total) * 100;\n\n// Grade classification\nlet grade, gradeVN, message;\nif (percentage >= 90) {\n  grade = 'A';\n  gradeVN = 'Xuất sắc';\n  message = '🎉 Tuyệt vời! Bạn đã làm rất tốt!';\n} else if (percentage >= 80) {\n  grade = 'B';\n  gradeVN = 'Giỏi';\n  message = '👏 Làm tốt lắm! Tiếp tục phát huy!';\n} else if (percentage >= 70) {\n  grade = 'C';\n  gradeVN = 'Khá';\n  message = '👍 Khá tốt! Hãy ôn thêm để cải thiện!';\n} else if (percentage >= 50) {\n  grade = 'D';\n  gradeVN = 'Trung bình';\n  message = '📚 Cần ôn tập thêm. Đừng nản lòng!';\n} else {\n  grade = 'F';\n  gradeVN = 'Yếu';\n  message = '💪 Hãy xem lại bài và làm lại nhé!';\n}\n\nreturn [{\n  json: {\n    student_name: studentName,\n    student_id: studentId,\n    quiz_name: quizName,\n    score: scoreRounded,\n    score_formatted: `${scoreRounded}/10`,\n    percentage: percentage.toFixed(1),\n    correct,\n    total,\n    grade,\n    grade_vn: gradeVN,\n    message,\n    results,\n    submitted_at: submission['Timestamp'] || submission['Thời gian'] || new Date().toISOString(),\n    timezone: 'Asia/Ho_Chi_Minh',\n    graded_at: new Date().toISOString()\n  }\n}];"
       },
       "id": "grade-submission",
       "name": "Grade Submission",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [500, 300],
-      "notes": "📝 Chấm điểm bằng cách so sánh answers với answer key. Customize ANSWER_KEY cho mỗi bài quiz. Format answers: Q1:A,Q2:B,..."
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
-          "conditions": [
-            {
-              "id": "pass-check",
-              "leftValue": "={{ $json.passed }}",
-              "rightValue": true,
-              "operator": {
-                "type": "boolean",
-                "operation": "true"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "if-passed",
-      "name": "IF: Đạt?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [750, 300],
-      "notes": "Nếu đạt (score >= 50) → gửi email chúc mừng. Nếu không → gửi email鼓励 làm lại."
-    },
-    {
-      "parameters": {
-        "sendTo": "={{ $json.student_email }}",
-        "subject": "🎉 Kết quả bài kiểm tra - {{ $json.grade }}",
-        "message": "=Chào {{ $json.student_name }},\n\n🎉 Chúc mừng! Bạn đã hoàn thành bài kiểm tra!\n\n━━━━━━━━━━━━━━━━━━━━\n📊 KẾT QUẢ\n━━━━━━━━━━━━━━━━━━━━\n\nĐiểm số: {{ $json.score }}%\nĐánh giá: {{ $json.grade }}\nSố câu đúng: {{ $json.correct_count }}/{{ $json.total_questions }}\nKết quả: ĐẠT ✅\n\n━━━━━━━━━━━━━━━━━━━━\n\nCảm ơn bạn đã hoàn thành bài kiểm tra!\n\nTrân trọng,\nGiảng viên",
-        "options": {}
-      },
-      "id": "send-pass-email",
-      "name": "Email Chúc mừng (Đạt)",
-      "type": "n8n-nodes-base.gmail",
-      "typeVersion": 2.1,
-      "position": [1000, 150],
-      "notes": "⚠️ Gửi email chúc mừng học sinh đạt. Cần Gmail OAuth2."
-    },
-    {
-      "parameters": {
-        "sendTo": "={{ $json.student_email }}",
-        "subject": "📚 Kết quả bài kiểm tra - Cần cải thiện",
-        "message": "=Chào {{ $json.student_name }},\n\nCảm ơn bạn đã hoàn thành bài kiểm tra.\n\n━━━━━━━━━━━━━━━━━━━━\n📊 KẾT QUẢ\n━━━━━━━━━━━━━━━━━━━━\n\nĐiểm số: {{ $json.score }}%\nĐánh giá: {{ $json.grade }}\nSố câu đúng: {{ $json.correct_count }}/{{ $json.total_questions }}\nKết quả: Chưa đạt ❌\n\n━━━━━━━━━━━━━━━━━━━━\n💡 LỜI KHUYÊN\n━━━━━━━━━━━━━━━━━━━━\n\nĐừng nản lòng! Hãy:\n1. Ôn lại tài liệu\n2. Làm bài tập thực hành\n3. Liên hệ giảng viên nếu cần hỗ trợ\n\nBạn có thể làm lại bài kiểm tra sau.\n\nTrân trọng,\nGiảng viên",
-        "options": {}
-      },
-      "id": "send-fail-email",
-      "name": "Email Encouragement (Chưa đạt)",
-      "type": "n8n-nodes-base.gmail",
-      "typeVersion": 2.1,
-      "position": [1000, 450],
-      "notes": "⚠️ Gửi email encouraging học sinh chưa đạt. Cần Gmail OAuth2."
+      "notes": "Chấm điểm tự động dựa trên answer key. Customize answer key cho mỗi bài quiz. Classification: A (90%+), B (80%+), C (70%+), D (50%+), F (<50%)"
     },
     {
       "parameters": {
@@ -98,27 +57,87 @@
           "mappingMode": "autoMapInputData",
           "value": {
             "student_name": "={{ $json.student_name }}",
-            "student_email": "={{ $json.student_email }}",
+            "student_id": "={{ $json.student_id }}",
+            "quiz_name": "={{ $json.quiz_name }}",
             "score": "={{ $json.score }}",
             "grade": "={{ $json.grade }}",
-            "correct_count": "={{ $json.correct_count }}",
-            "total_questions": "={{ $json.total_questions }}",
-            "passed": "={{ $json.passed }}",
+            "grade_vn": "={{ $json.grade_vn }}",
+            "correct": "={{ $json.correct }}",
+            "total": "={{ $json.total }}",
+            "percentage": "={{ $json.percentage }}",
             "graded_at": "={{ $json.graded_at }}"
           }
         },
         "options": {}
       },
-      "id": "log-grade",
-      "name": "Log Grade to Sheets",
+      "id": "log-grades",
+      "name": "Log Grades to Google Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [1250, 300],
-      "notes": "⚠️ Lưu điểm vào Google Sheets gradebook. Cần Sheet ID."
+      "position": [750, 300],
+      "notes": "⚠️ Lưu điểm vào Google Sheets. Columns: student_name, student_id, quiz_name, score, grade, grade_vn, correct, total, percentage, graded_at. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "high-score",
+              "leftValue": "={{ $json.percentage }}",
+              "rightValue": 80,
+              "operator": {
+                "type": "number",
+                "operation": "larger"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-good-score",
+      "name": "IF: Score >= 80%?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "notes": "Nếu điểm >= 80% → Gửi email khen ngợi. Nếu < 80% → Gửi email động viên + gợi ý ôn tập."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.student_email || '' }}",
+        "subject": "🎉 Kết quả bài quiz: {{ $json.quiz_name }} - {{ $json.score_formatted }} ({{ $json.grade }})",
+        "message": "=Chào {{ $json.student_name }},\n\n{{ $json.message }}\n\n━━━━━━━━━━━━━━━━━━━━\n📊 KẾT QUẢ BÀI QUIZ\n━━━━━━━━━━━━━━━━━━━━\n\nBài quiz: {{ $json.quiz_name }}\nĐiểm số: {{ $json.score_formatted }} ({{ $json.percentage }}%)\nXếp loại: {{ $json.grade_vn }} ({{ $json.grade }})\n\nSố câu đúng: {{ $json.correct }}/{{ $json.total }}\n\n━━━━━━━━━━━━━━━━━━━━\n\n{{ $json.percentage >= 80 ? '🌟 Chúc mừng bạn đã đạt kết quả tốt! Hãy tiếp tục phát huy!' : '📚 Hãy ôn tập thêm và thử làm lại nhé. Bạn có thể làm tốt hơn!' }}\n\nTrân trọng,\nGiáo viên",
+        "options": {}
+      },
+      "id": "email-good",
+      "name": "Send Congratulatory Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 150],
+      "notes": "⚠️ Gửi email khen ngợi cho học viên đạt >= 80%. Cần Gmail OAuth và student_email field."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.student_email || '' }}",
+        "subject": "📚 Kết quả bài quiz: {{ $json.quiz_name }} - {{ $json.score_formatted }}",
+        "message": "=Chào {{ $json.student_name }},\n\n{{ $json.message }}\n\n━━━━━━━━━━━━━━━━━━━━\n📊 KẾT QUẢ BÀI QUIZ\n━━━━━━━━━━━━━━━━━━━━\n\nBài quiz: {{ $json.quiz_name }}\nĐiểm số: {{ $json.score_formatted }} ({{ $json.percentage }}%)\nXếp loại: {{ $json.grade_vn }} ({{ $json.grade }})\n\nSố câu đúng: {{ $json.correct }}/{{ $json.total }}\n\n━━━━━━━━━━━━━━━━━━━━\n\n💡 Gợi ý cải thiện:\n{{ $json.results.filter(r => !r.is_correct).map(r => `• ${r.question}: Đáp án đúng là ${r.correct_answer}`).join('\\n') || '✅ Bạn đã trả lời đúng tất cả!' }}\n\n📖 Hãy xem lại tài liệu và thử làm lại nhé!\n\nTrân trọng,\nGiáo viên",
+        "options": {}
+      },
+      "id": "email-needs-work",
+      "name": "Send Improvement Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 450],
+      "notes": "⚠️ Gửi email động viên + gợi ý ôn tập cho học viên < 80%. Cần Gmail OAuth."
     }
   ],
   "connections": {
-    "Google Sheets Trigger (Bài nộp mới)": {
+    "Google Sheets Trigger (New Submission)": {
       "main": [
         [
           {
@@ -133,47 +152,36 @@
       "main": [
         [
           {
-            "node": "IF: Đạt?",
+            "node": "Log Grades to Google Sheets",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "IF: Đạt?": {
+    "Log Grades to Google Sheets": {
       "main": [
         [
           {
-            "node": "Email Chúc mừng (Đạt)",
+            "node": "IF: Score >= 80%?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Score >= 80%?": {
+      "main": [
+        [
+          {
+            "node": "Send Congratulatory Email",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Email Encouragement (Chưa đạt)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Email Chúc mừng (Đạt)": {
-      "main": [
-        [
-          {
-            "node": "Log Grade to Sheets",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Email Encouragement (Chưa đạt)": {
-      "main": [
-        [
-          {
-            "node": "Log Grade to Sheets",
+            "node": "Send Improvement Email",
             "type": "main",
             "index": 0
           }
@@ -188,11 +196,12 @@
     "timezone": "Asia/Ho_Chi_Minh"
   },
   "staticData": null,
-  "tags": ["education", "grading", "auto-grading", "quiz", "assessment"],
+  "tags": ["education", "grading", "auto-grading", "quiz", "vietnamese"],
   "triggerCount": 1,
   "versionId": "1.0.0",
   "meta": {
     "templateCredsSetupCompleted": false,
-    "instanceId": "education-workflow"
+    "instanceId": "education-workflow",
+    "usage": "Auto-grade quiz submissions from Google Sheets. Customize answer key for each quiz in the Code node."
   }
 }

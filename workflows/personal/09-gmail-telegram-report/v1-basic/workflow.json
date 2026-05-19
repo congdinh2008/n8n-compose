@@ -1,0 +1,98 @@
+{
+  "name": "Gmail → Telegram Daily Report (V1 Basic)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "triggerAtHour": 7, "triggerAtMinute": 0 }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "⏰ Trigger 7h Sáng",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Chạy lúc 7:00 sáng mỗi ngày. Timezone: Asia/Ho_Chi_Minh (cài trong workflow Settings)."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 50,
+        "filters": {
+          "q": "is:unread newer_than:1d"
+        },
+        "options": {}
+      },
+      "id": "gmail-get",
+      "name": "📬 Lấy Email Chưa Đọc",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [480, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_GMAIL_CRED_ID",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "notes": "⚠️ Cần cài Gmail OAuth2 credential. Lấy tối đa 50 email unread trong 24h qua."
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = $input.all();\nconst total = emails.length;\nconst dateStr = new Date().toLocaleDateString('vi-VN', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  timeZone: 'Asia/Ho_Chi_Minh'\n});\n\nif (total === 0) {\n  return [{ json: { message: `📧 *Báo Cáo Email - ${dateStr}*\\n\\n✅ Không có email mới!` } }];\n}\n\nconst list = emails.slice(0, 10).map((item, i) => {\n  const from = (item.json.from || 'Unknown').replace(/<[^>]+>/g, '').trim().substring(0, 40);\n  const subject = (item.json.subject || '(no subject)').substring(0, 55);\n  return `${i+1}. *${subject}*\\n   📤 ${from}`;\n}).join('\\n\\n');\n\nconst extra = total > 10 ? `\\n\\n_... và ${total - 10} email khác_` : '';\n\nreturn [{ json: {\n  message: `📧 *Báo Cáo Email Sáng*\\n📅 ${dateStr}\\n\\n📊 Tổng chưa đọc: *${total} email*\\n\\n${list}${extra}\\n\\n💡 Mở Gmail để xử lý nhé!`,\n  total\n}}];"
+      },
+      "id": "format-report",
+      "name": "📝 Tạo Báo Cáo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300],
+      "notes": "Tổng hợp email thành tin nhắn Telegram. V1: đơn giản, chỉ liệt kê email."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "send-telegram",
+      "name": "📱 Gửi Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [960, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_TELEGRAM_CRED_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "notes": "⚠️ Cần cài Telegram credential. Dùng $vars.TELEGRAM_CHAT_ID (Settings → Variables)."
+    }
+  ],
+  "connections": {
+    "⏰ Trigger 7h Sáng": { "main": [[{ "node": "📬 Lấy Email Chưa Đọc", "type": "main", "index": 0 }]] },
+    "📬 Lấy Email Chưa Đọc": { "main": [[{ "node": "📝 Tạo Báo Cáo", "type": "main", "index": 0 }]] },
+    "📝 Tạo Báo Cáo": { "main": [[{ "node": "📱 Gửi Telegram", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {
+    "📬 Lấy Email Chưa Đọc": [
+      { "json": { "id": "demo-1", "from": "boss@company.com", "subject": "Q2 Report - Cần review", "date": "2026-05-11T06:30:00Z" } },
+      { "json": { "id": "demo-2", "from": "newsletter@medium.com", "subject": "Daily Digest: Top Stories", "date": "2026-05-11T05:00:00Z" } },
+      { "json": { "id": "demo-3", "from": "shopee@deals.shopee.vn", "subject": "Flash Sale 50% hôm nay!", "date": "2026-05-11T04:00:00Z" } },
+      { "json": { "id": "demo-4", "from": "client@startup.vn", "subject": "Proposal - cần phản hồi gấp", "date": "2026-05-11T03:30:00Z" } },
+      { "json": { "id": "demo-5", "from": "no-reply@github.com", "subject": "Your PR has been merged", "date": "2026-05-11T02:00:00Z" } }
+    ]
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "tags": ["personal", "gmail", "telegram", "daily-report", "v1-basic"],
+  "meta": {
+    "usage": "V1 BASIC: 4 nodes. Phù hợp người mới học n8n.",
+    "difficulty": "⭐ Beginner",
+    "nodes_count": 4,
+    "setup_time": "15 phút"
+  }
+}

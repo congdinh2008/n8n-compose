@@ -1,0 +1,265 @@
+{
+  "name": "Personal: Learning Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "everyHour",
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (7 PM Daily)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "notes": "⚙️ Cấu hình: Chạy hàng ngày lúc 7:00 PM. Đổi 'everyHour' thành 'everyDay' và set triggerAtHour = 19"
+    },
+    {
+      "parameters": {
+        "authentication": "none",
+        "url": "https://www.reddit.com/r/programming/hot.json?limit=10",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-reddit",
+      "name": "Fetch Reddit (r/programming)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 150],
+      "notes": "⚠️ Lấy top posts từ Reddit r/programming. Không cần API key cho read-only. Có thể thay bằng r/learnprogramming, r/artificial."
+    },
+    {
+      "parameters": {
+        "authentication": "none",
+        "url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "print",
+              "value": "pretty"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-hn-ids",
+      "name": "Fetch HackerNews IDs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300],
+      "notes": "⚠️ Lấy top story IDs từ HackerNews API. Free, không cần API key."
+    },
+    {
+      "parameters": {
+        "authentication": "none",
+        "url": "https://hacker-news.firebaseio.com/v0/item/{{ $json }}.json",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-hn-details",
+      "name": "Fetch HN Story Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 300],
+      "notes": "Lấy chi tiết từng story (title, url, score). Loop qua top 10 IDs."
+    },
+    {
+      "parameters": {
+        "authentication": "none",
+        "url": "https://www.googleapis.com/youtube/v3/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet"
+            },
+            {
+              "name": "maxResults",
+              "value": "10"
+            },
+            {
+              "name": "q",
+              "value": "programming tutorial"
+            },
+            {
+              "name": "type",
+              "value": "video"
+            },
+            {
+              "name": "order",
+              "value": "date"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-youtube",
+      "name": "Fetch YouTube (Programming)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 450],
+      "notes": "⚠️ Cần YouTube Data API key. Set trong Query Parameters hoặc Header. Free tier: 10,000 units/day."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate content từ tất cả sources\nconst reddit = $('Fetch Reddit (r/programming)').all();\nconst hn = $('Fetch HN Story Details').all();\nconst youtube = $('Fetch YouTube (Programming)').all();\n\nconst keywords = [\n  'AI', 'machine learning', 'deep learning', 'neural network',\n  'web development', 'frontend', 'backend', 'fullstack',\n  'Python', 'JavaScript', 'TypeScript', 'React', 'Vue', 'Angular',\n  'API', 'database', 'cloud', 'devops', 'kubernetes', 'docker'\n];\n\nfunction matchesKeywords(text) {\n  if (!text) return false;\n  const lower = text.toLowerCase();\n  return keywords.some(kw => lower.includes(kw.toLowerCase()));\n}\n\nconst filteredContent = [];\n\n// Process Reddit posts\nreddit.forEach(item => {\n  const post = item.json.data?.children?.[0]?.data || item.json.data || {};\n  if (matchesKeywords(post.title) || matchesKeywords(post.selftext)) {\n    filteredContent.push({\n      source: 'Reddit',\n      title: post.title || 'Untitled',\n      url: `https://reddit.com${post.permalink}` || post.url || '',\n      score: post.score || 0,\n      summary: post.selftext?.substring(0, 200) || ''\n    });\n  }\n});\n\n// Process HackerNews stories\nhn.forEach(item => {\n  const story = item.json;\n  if (matchesKeywords(story.title) || matchesKeywords(story.text)) {\n    filteredContent.push({\n      source: 'HackerNews',\n      title: story.title || 'Untitled',\n      url: story.url || `https://news.ycombinator.com/item?id=${story.id}`,\n      score: story.score || 0,\n      summary: story.text?.substring(0, 200) || ''\n    });\n  }\n});\n\n// Process YouTube videos\nyoutube.forEach(item => {\n  const video = item.json.items?.[0] || item.json;\n  const snippet = video.snippet || {};\n  if (matchesKeywords(snippet.title) || matchesKeywords(snippet.description)) {\n    filteredContent.push({\n      source: 'YouTube',\n      title: snippet.title || 'Untitled',\n      url: `https://youtube.com/watch?v=${snippet.resourceId?.videoId || video.id?.videoId || ''}`,\n      score: 0,\n      summary: snippet.description?.substring(0, 200) || ''\n    });\n  }\n});\n\n// Sort by score and take top 10\nconst topContent = filteredContent\n  .sort((a, b) => b.score - a.score)\n  .slice(0, 10);\n\nconsole.log(`Found ${filteredContent.length} relevant articles`);\nconsole.log(`Top ${topContent.length} selected`);\n\nreturn [{\n  json: {\n    content: topContent,\n    total_found: filteredContent.length,\n    date: new Date().toISOString().split('T')[0],\n    sources: {\n      reddit: reddit.length,\n      hackernews: hn.length,\n      youtube: youtube.length\n    }\n  }\n}];"
+      },
+      "id": "filter-content",
+      "name": "Filter & Aggregate Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "notes": "Gộp content từ tất cả sources, lọc theo keywords, sort theo score, lấy top 10."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format evening digest email tiếng Việt\nconst data = $input.first().json;\n\nconst contentSections = data.content.map((item, i) => {\n  const sourceIcon = item.source === 'Reddit' ? '📱' : \n                     item.source === 'HackerNews' ? '🔥' : '🎥';\n  \n  return `${i + 1}. ${sourceIcon} **${item.title}**\n   Nguồn: ${item.source}\n   Link: ${item.url}\n   ${item.summary ? 'Tóm tắt: ' + item.summary + '\\n' : ''}`;\n}).join('\\n\\n');\n\nconst email = {\n  to: '', // Điền email của bạn\n  subject: `📚 Learning Digest - ${data.date}`,\n  body: `Chào buổi tối! 🌙\n\nĐây là tóm tắt content học tập hôm nay:\n\n━━━━━━━━━━━━━━━━━━━━\n📊 TỔNG QUAN\n━━━━━━━━━━━━━━━━━━━━\n\n📱 Reddit: ${data.sources.reddit} posts\n🔥 HackerNews: ${data.sources.hackernews} stories\n🎥 YouTube: ${data.sources.youtube} videos\n\n✅ Tổng hợp: ${data.total_found} bài viết phù hợp\n\n━━━━━━━━━━━━━━━━━━━━\n📖 TOP BÀI VIẾT HÔM NAY\n━━━━━━━━━━━━━━━━━━━━\n\n${contentSections}\n\n━━━━━━━━━━━━━━━━━━━━\n\n💡 Lời khuyên: Hãy dành 30 phút đọc 1-2 bài quan trọng nhất!\n\nChúc buổi tối học tập hiệu quả! 🚀`,\n  digest_data: data\n};\n\nreturn [{ json: email }];"
+      },
+      "id": "format-digest",
+      "name": "Format Learning Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "notes": "Tạo email digest tiếng Việt với formatting đẹp. Điền 'to' = email của bạn."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1500, 300],
+      "notes": "⚠️ Gửi email digest. Cần Gmail OAuth2 credential."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (7 PM Daily)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Reddit (r/programming)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch HackerNews IDs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch YouTube (Programming)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch HackerNews IDs": {
+      "main": [
+        [
+          {
+            "node": "Fetch HN Story Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Reddit (r/programming)": {
+      "main": [
+        [
+          {
+            "node": "Filter & Aggregate Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch HN Story Details": {
+      "main": [
+        [
+          {
+            "node": "Filter & Aggregate Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch YouTube (Programming)": {
+      "main": [
+        [
+          {
+            "node": "Filter & Aggregate Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter & Aggregate Content": {
+      "main": [
+        [
+          {
+            "node": "Format Learning Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Learning Digest": {
+      "main": [
+        [
+          {
+            "node": "Send Email (Gmail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["personal", "learning", "digest", "reddit", "hackernews", "youtube"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "personal-workflow"
+  }
+}

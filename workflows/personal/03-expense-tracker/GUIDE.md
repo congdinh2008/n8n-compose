@@ -1,37 +1,35 @@
-# 💰 Personal: Expense Tracker
+# 👤 Personal: Expense Tracker
 
 ## Mục tiêu
-Tự động **theo dõi chi tiêu cá nhân** từ email thông báo giao dịch ngân hàng:
+Tự động **theo dõi chi tiêu** từ email sao kê ngân hàng:
 - Parse thông tin giao dịch từ email (số tiền, merchant, ngày)
-- Tự động phân loại chi tiêu (cà phê, mua sắm, di chuyển, v.v.)
+- Tự động phân loại chi tiêu (coffee, shopping, transport, v.v.)
 - Log vào Google Sheets để theo dõi
-- Cảnh báo khi vượt quá ngân sách hàng tháng
+- Alert nếu vượt ngân sách tháng
 
 ## Đối tượng sử dụng
-**Cá nhân** - Bất kỳ ai muốn tự động theo dõi chi tiêu hàng ngày mà không cần nhập thủ công.
+**Cá nhân** - Bất kỳ ai muốn kiểm soát chi tiêu cá nhân tự động.
 
 ## Sơ đồ luồng
 ```
-[Gmail Trigger (Bank Emails)]
+[Gmail Trigger - Bank Transaction Email]
          │
          ▼
 [Parse Transaction Data]
-  (Regex extraction từ email)
+  (Regex extract amount, merchant, date)
          │
          ▼
 [Categorize Expense]
-  (Merchant → Category mapping)
+  (Based on merchant name)
          │
          ▼
 [Log to Google Sheets]
          │
          ▼
-    IF: Budget Exceeded?
-    │          │
-    Yes        No
-    │          │
-    ▼          ▼
-[Telegram   [Log Silent]
+[IF: Monthly Budget Exceeded?]
+    │ yes          │ no
+    ▼              ▼
+[Telegram      [Silent Log]
  Alert]
 ```
 
@@ -39,39 +37,24 @@ Tự động **theo dõi chi tiêu cá nhân** từ email thông báo giao dịc
 
 | Node | Type | Configuration | Credentials |
 |------|------|---------------|-------------|
-| Gmail Trigger | Gmail | Filter: bank email addresses | Gmail OAuth2 |
-| Parse Transaction Data | Code | Regex cho VND, date, merchant | None |
-| Categorize Expense | Code | Merchant → Category mapping | None |
+| Gmail Trigger | Gmail Trigger | Poll every 5 minutes | Gmail OAuth2 |
+| Parse Transaction | Code | Regex extraction | None |
+| Categorize Expense | Code | Merchant matching | None |
 | Log to Google Sheets | Google Sheets | Append row | Google Sheets OAuth2 |
-| IF: Budget Exceeded? | IF | Check % of monthly budget | None |
-| Send Telegram Alert | Telegram | Budget exceeded warning | Telegram Bot Token |
+| IF: Budget Exceeded? | IF | Check monthly total | None |
+| Telegram Alert | Telegram | Budget warning | Telegram Bot Token |
 
 ## Cài đặt
 
-### Bước 1: Cấu hình Gmail Trigger
+### Bước 1: Tạo Google Sheets Expense Log
 
-Mở node "Gmail Trigger (Bank Emails)" và set **from filter** với các email ngân hàng:
+Tạo Google Sheet với cấu trúc:
 
-```
-vietcombank: noreply@vietcombank.com.vn
-techcombank: alert@techcombank.com.vn
-vpbank: notifications@vpbank.com.vn
-mbbank: contact@mbbank.com.vn
-bidv: customer@bidv.com.vn
-agribank: customercare@agribank.com.vn
-acb: notification@acb.com.vn
-tpbank: donotreply@tpb.vn
-vib: noreply@vib.com.vn
-shb: notification@shb.com.vn
-```
-
-### Bước 2: Chuẩn bị Google Sheets
-
-Tạo Google Sheet với các columns:
-
-| date | merchant | amount | category | type | email_from | parsed_at |
-|------|----------|--------|----------|------|------------|-----------|
-| 2026-05-05 | Highlands Coffee | 45,000 | Cà phê/Trà sữa | purchase | noreply@... | 2026-05-05T... |
+| date | merchant | amount | category | source |
+|------|----------|--------|----------|--------|
+| 2026-05-05 | Starbucks | 85000 | coffee | Email |
+| 2026-05-05 | Shopee | 250000 | shopping | Email |
+| 2026-05-04 | Grab | 45000 | transport | Email |
 
 **Lấy Sheet ID:**
 ```
@@ -80,164 +63,158 @@ URL: https://docs.google.com/spreadsheets/d/SHEET_ID/edit
                                          Copy phần này
 ```
 
-### Bước 3: Cấu hình Credentials
+### Bước 2: Customize Bank Email Patterns
+
+Mở node "Parse Transaction Data" và cập nhật regex patterns theo ngân hàng của bạn:
+
+```javascript
+// Vietcombank
+const vcbPatterns = {
+  amount: /Số tiền giao dịch:\s*([\d,]+)\s*VND/,
+  merchant: /Tại đơn vị:\s*(.+?)(?:\n|$)/,
+  date: /Thời gian giao dịch:\s*(\d{2}\/\d{2}\/\d{4})/
+};
+
+// Techcombank
+const tcbPatterns = {
+  amount: /Số tiền:\s*([\d,]+)\s*(?:VND|₫)/,
+  merchant: /Nội dung:\s*(.+?)(?:\n|$)/,
+  date: /Ngày:\s*(\d{2}-\d{2}-\d{4})/
+};
+```
+
+### Bước 3: Customize Categories
+
+Mở node "Categorize Expense" và cập nhật merchant mapping:
+
+```javascript
+const categories = {
+  // Coffee/Tea
+  'starbucks': 'coffee',
+  'highlands': 'coffee',
+  'trung nguyen': 'coffee',
+  'phuc long': 'coffee',
+  
+  // Shopping
+  'shopee': 'shopping',
+  'lazada': 'shopping',
+  'tiki': 'shopping',
+  
+  // Transport
+  'grab': 'transport',
+  'be': 'transport',
+  'gojek': 'transport',
+  
+  // Food
+  'now': 'food',
+  'shopeefood': 'food',
+  'foody': 'food',
+  
+  // Bills
+  'evn': 'bills',
+  'vnpt': 'bills',
+  'viettel': 'bills'
+};
+```
+
+### Bước 4: Cấu hình Monthly Budget
+
+Mở node "IF: Budget Exceeded?" và set budgets:
+
+```javascript
+const monthlyBudgets = {
+  coffee: 500000,      // 500k/tháng
+  shopping: 2000000,   // 2 triệu/tháng
+  transport: 1000000,  // 1 triệu/tháng
+  food: 3000000,       // 3 triệu/tháng
+  bills: 2000000,      // 2 triệu/tháng
+  other: 1000000       // 1 triệu/tháng
+};
+```
+
+### Bước 5: Chuẩn bị Credentials
 
 | Credential | Hướng dẫn |
 |-----------|-----------|
-| **Gmail OAuth2** | Settings → Credentials → Add → Gmail OAuth2 → Connect |
+| **Gmail OAuth2** | Settings → Credentials → Add → Gmail → Connect |
 | **Google Sheets OAuth2** | Settings → Credentials → Add → Google Sheets → Connect |
-| **Telegram Bot** (Optional) | Tạo bot qua @BotFather → Copy token → Add credentials |
+| **Telegram Bot** (Optional) | @BotFather → Create bot → Copy token |
 
-### Bước 4: Import Workflow
+### Bước 6: Import Workflow
 
 1. Mở n8n Dashboard
 2. **Add Workflow** → **Import from File**
 3. Chọn: `workflows/personal/03-expense-tracker/workflow.json`
 4. Click **Import**
 
-### Bước 5: Cấu hình Nodes
+### Bước 7: Cấu hình Nodes
 
-**1. Log to Google Sheets:**
-- Mở node "Log to Google Sheets"
+**1. Gmail Trigger:**
+- Set **Poll Interval** = Every 5 minutes
+- Filter emails từ ngân hàng (ví dụ: `from:ecf@vietcombank.com.vn`)
+- Gán Gmail credential
+
+**2. Log to Google Sheets:**
 - Set **Document ID** = Sheet ID của bạn
-- Set **Sheet Name** = tên sheet (thường là "Sheet1")
+- Set **Sheet Name** = tên sheet
 
-**2. Customize Budgets:**
-- Mở node "Categorize Expense"
-- Điều chỉnh ngân sách hàng tháng trong code:
-```javascript
-const monthlyBudgets = {
-  coffee: 1000000,      // 1 triệu - Điều chỉnh theo nhu cầu
-  shopping: 5000000,    // 5 triệu
-  transport: 2000000,   // 2 triệu
-  food: 3000000,        // 3 triệu
-  bills: 2000000,       // 2 triệu
-  entertainment: 1000000,
-  health: 5000000,
-  education: 3000000,
-  other: 2000000
-};
-```
-
-**3. Customize Categories:**
-- Trong cùng node "Categorize Expense"
-- Thêm merchant vào categories:
-```javascript
-const categories = {
-  coffee: ['starbucks', 'highlands', 'trung nguyen', /* thêm merchant */],
-  shopping: ['shopee', 'lazada', 'tiki', /* thêm merchant */],
-  // ...
-};
-```
-
-**4. Send Telegram Alert (Optional):**
+**3. Telegram Alert (Optional):**
 - Set **Chat ID** = chat ID của bạn
 - Gán Telegram credential
-- **Hoặc xóa node này** nếu không dùng Telegram
 
-### Bước 6: Test
+### Bước 8: Test
 
-1. Đợi email ngân hàng thật đến HOẶC gửi email test với nội dung giao dịch
-2. Click **Test Workflow**
+1. Forward thử một email sao kê từ ngân hàng
+2. Hoặc dùng email mẫu với format giống thật
 3. Kiểm tra:
-   - ✅ Số tiền được parse đúng không?
-   - ✅ Merchant được nhận diện đúng không?
+   - ✅ Transaction được parse đúng không?
    - ✅ Category được gán đúng không?
    - ✅ Google Sheets có row mới không?
-   - ✅ Telegram alert có gửi nếu vượt budget không?
-
-## Email Patterns Supported
-
-### Vietnamese Bank Email Formats
-
-**Vietcombank:**
-```
-Số tiền giao dịch: 1,234,567 VND
-tại: SHOPEE VN
-Thời gian: 05/05/2026 14:30
-```
-
-**Techcombank:**
-```
-GD: 1.234.567đ
-Nội dung: Thanh toan don hang
- Merchant: TIKI
-```
-
-**MB Bank:**
-```
-So tien: 500,000 VND
-Ten Don vi: GRAB
-Thoi gian: 2026-05-05T14:30:00
-```
-
-### Regex Patterns Used
-- Amount: `/([\d\.,]+)\s*(?:[Vv][Nn][Dd]|[₫đ])/`
-- Merchant: `/(?:tại|ở|TẠI|Ở)\s+([^\n,.]+)/`
-- Date: `/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}:\d{2})/`
-
-## Category Mapping
-
-| Category | Merchants | Monthly Budget (default) |
-|----------|-----------|--------------------------|
-| Cà phê/Trà sữa | Starbucks, Highlands, Trung Nguyen, Phuc Long | 1,000,000đ |
-| Mua sắm | Shopee, Lazada, Tiki, Aeon, Lotte | 5,000,000đ |
-| Di chuyển | Grab, Be, Gojek, Uber, Taxi | 2,000,000đ |
-| Ăn uống | Now, ShopeeFood, Foody | 3,000,000đ |
-| Hóa đơn | EVN, VNPT, Viettel, FPT | 2,000,000đ |
-| Giải trí | Netflix, Spotify, YouTube Premium | 1,000,000đ |
-| Sức khỏe | Nhà thuốc, Bệnh viện, Phòng khám | 5,000,000đ |
-| Giáo dục | VnEdu, Coursera, Udemy | 3,000,000đ |
-| Khác | Everything else | 2,000,000đ |
+   - ✅ Alert có gửi nếu vượt budget không?
+4. Nếu OK → **Activate** workflow
 
 ## Troubleshooting
 
 | Lỗi | Nguyên nhân | Giải pháp |
 |-----|------------|-----------|
-| Không parse được số tiền | Email format không match regex | Kiểm tra email mẫu và update regex trong Code node |
-| Merchant không nhận diện | Tên merchant không có trong list | Thêm merchant vào categories trong Code node |
-| Google Sheets error | Sheet ID sai hoặc credential hết hạn | Kiểm tra Sheet ID và reconnect OAuth |
-| Không có alert khi vượt budget | Budget configuration sai | Kiểm tra monthlyBudgets trong Code node |
-| Telegram không gửi được | Bot token hoặc chat_id sai | Kiểm tra credentials |
+| Không parse được email | Regex không khớp | Update patterns trong Code node |
+| Category sai | Merchant không trong list | Thêm merchant vào categories |
+| Email không trigger | Filter sai | Kiểm tra email filter trong trigger |
+| Sheet không update | Sheet ID sai | Kiểm tra lại URL Google Sheets |
 
 ## ⚠️ Lưu ý Community Version
 
-- ✅ **Gmail node** có sẵn, chỉ cần OAuth2
-- ✅ **Google Sheets node** có sẵn
-- ⚠️ **Email parsing** depends on bank email format - có thể cần customize regex
-- ⚠️ **OAuth2 credentials** cần reconnect định kỳ
-- 💡 **Tip**: Test với email thật từ ngân hàng của bạn trước khi dùng production
+- ✅ **Gmail trigger** có sẵn, hoạt động tốt
+- ✅ **Code node** parse regex hoàn toàn trong community
+- ⚠️ **Mỗi ngân hàng có email format khác nhau** - cần customize regex
+- 💡 **Tip**: Bắt đầu với 1 ngân hàng, test kỹ, sau đó thêm ngân hàng khác
 
 ## Mở rộng
 
+### Thêm Multiple Bank Support
+Parse emails từ nhiều ngân hàng:
+```javascript
+const bankPatterns = {
+  vietcombank: vcbPatterns,
+  techcombank: tcbPatterns,
+  vpbank: vpbankPatterns
+};
+
+// Detect bank from sender email
+const bank = detectBank(email.from);
+const pattern = bankPatterns[bank];
+```
+
 ### Thêm Monthly Report
-Tạo workflow riêng chạy ngày 1 hàng tháng:
+Tạo báo cáo cuối tháng:
 ```
-Schedule (monthly) → Read Google Sheets → Calculate totals → Send report email
+Schedule (Last day of month) → Query Sheets → Generate report → Send email
 ```
 
-### Thêm Budget Top-up Notifications
-Gửi reminder khi đạt 80% budget:
+### Thêm Budget Recommendations
+AI đề xuất giảm chi tiêu:
 ```javascript
-if (budgetPercentage >= 80 && budgetPercentage < 100) {
-  // Gửi warning thay vì alert
-  message = `⚠️ Bạn đã sử dụng ${budgetPercentage}% ngân sách ${category_vn}`;
+if (spent > budget * 0.8) {
+  recommendations.push(`⚠️ Bạn đã dùng 80% ngân sách ${category}`);
 }
-```
-
-### Thêm Income Tracking
-Theo dõi thu nhập để tính savings rate:
-```javascript
-if (transaction.type === 'deposit') {
-  category = 'income';
-  // Log vào sheet riêng
-}
-```
-
-### Tích hợp với MoMo/ZaloPay
-Dùng HTTP Request node để lấy giao dịch từ ví điện tử:
-```javascript
-const momoTransactions = await fetch('https://api.momo.vn/v1/transactions', {
-  headers: { 'Authorization': 'Bearer YOUR_TOKEN' }
-});
 ```

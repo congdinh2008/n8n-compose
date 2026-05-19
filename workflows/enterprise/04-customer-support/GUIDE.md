@@ -1,77 +1,73 @@
-# 🏢 Enterprise: Customer Support Automation
+# 🎧 Enterprise: Customer Support Automation
 
 ## Mục tiêu
-Tự động hóa quy trình **hỗ trợ khách hàng** qua email:
-- Phân loại yêu cầu hỗ trợ tự động
-- Tạo ticket và assign đúng team
-- Xử lý refund tự động (nếu < threshold)
-- Gửi phản hồi nhanh chóng
-- SLA monitoring
+Tự động hóa **hỗ trợ khách hàng**:
+- Phân loại yêu cầu hỗ trợ từ email
+- Routing đến đúng team/person
+- Auto-respond với FAQs
+- Tạo tickets trong Google Sheets
+- SLA monitoring & escalation
 
 ## Đối tượng sử dụng
-**Doanh nghiệp** - Customer support teams, helpdesk, bất kỳ ai xử lý email hỗ trợ từ khách hàng.
+**Doanh nghiệp** - Support teams, customer service, help desks.
 
 ## Sơ đồ luồng
 ```
-[Gmail Trigger (Support Email)]
+[Gmail Trigger - Support Email]
          │
          ▼
-[Parse & Classify Email]
-  (Keyword matching)
+[Classify Request Type]
+  (Code node - keywords)
          │
-    ┌────┼────┐
-    ▼    ▼    ▼
-[Refund] [Question] [Tech Issue] [Complaint] [General]
-    │       │         │            │          │
-    ▼       ▼         ▼            ▼          ▼
-[IF:     [Send     [Create      [Notify     [Send
- amount   FAQ]      High-Prio     Manager     Auto-
- < 500K?]            Ticket]      + Ticket    Reply]
-    │
-    ├─[Yes]→ Auto-approve
-    │
-    └─[No] → Manager Approval
-         │
-         ▼
-   [Log to Google Sheets]
+    ┌────┼────┬────┬────┐
+    ▼    ▼    ▼    ▼    ▼
+[Refund] [Q] [Tech] [Complaint] [General]
+    │    │    │    │    │
+    ▼    ▼    ▼    ▼    ▼
+[IF:    [Send  [Create [Notify  [Send
+Amount  FAQ]   High-  Manager] Auto-
+< 500K?]        ticket]        reply]
+ │ yes  │ no
+ ▼      ▼
+[Auto  [Manager
+Approve] Approval]
 ```
 
 ## Nodes chi tiết
 
 | Node | Type | Configuration | Credentials |
 |------|------|---------------|-------------|
-| Gmail Trigger | Gmail | Poll new emails from support@ | Gmail OAuth2 |
-| Parse & Classify | Code | Keyword matching VN/EN | None |
+| Gmail Trigger | Gmail Trigger | Poll every 5 min | Gmail OAuth2 |
+| Classify Request | Code | Vietnamese keywords | None |
 | Create Ticket | Google Sheets | Append row | Google Sheets OAuth2 |
-| IF: Refund Amount | IF | Check < 500,000 VND | None |
-| Send FAQ Response | Gmail | Template tiếng Việt | Gmail OAuth2 |
-| Notify Tech Team | Slack | Message to #tech-support | Slack OAuth2 |
-| Notify Manager | Slack/Email | Urgent alert | Slack/Gmail OAuth2 |
-| Send Auto-Reply | Gmail | Ticket number + ETA | Gmail OAuth2 |
+| Check Refund Amount | IF | < 500,000 VND | None |
+| Auto-Approve Refund | Gmail/SendGrid | Approval email | Gmail OAuth2 |
+| Send FAQ Response | Gmail/SendGrid | FAQ template | Gmail OAuth2 |
+| Create Tech Ticket | Google Sheets + Slack | High priority | Slack OAuth2 |
+| Notify Manager | Slack/Email | Urgent alert | Slack OAuth2 |
+| Send Auto-Reply | Gmail/SendGrid | Ticket number | Gmail OAuth2 |
 
 ## Cài đặt
 
-### Bước 1: Chuẩn bị Google Sheets Ticket System
+### Bước 1: Tạo Google Sheets Support Tracker
 
-Tạo Google Sheet với các columns:
+| ticket_id | customer_email | request_type | priority | status | created_at | assigned_to | resolved_at |
+|-----------|---------------|--------------|----------|--------|------------|-------------|-------------|
+| TKT-001 | customer@email.com | refund | low | resolved | 2026-05-05 | auto | 2026-05-06 |
 
-| ticket_id | customer_email | subject | category | priority | status | created_at | assigned_to | resolved_at | sla_deadline |
-|-----------|---------------|---------|----------|----------|--------|------------|-------------|-------------|--------------|
-| TKT-123 | a@email.com | Lỗi đăng nhập | Technical | High | Open | 2026-05-05 | tech-team | | 2026-05-06 |
+### Bước 2: Cấu hình Keywords Classification
 
-**SLA Deadlines:**
-- Technical Issue: 4 hours
-- Refund: 24 hours
-- General: 48 hours
-- Complaint: 2 hours
+Mở node "Classify Request Type" và customize keywords:
 
-### Bước 2: Cấu hình Credentials
-
-| Credential | Hướng dẫn |
-|-----------|-----------|
-| **Gmail OAuth2** | Settings → Credentials → Add → Gmail → Connect với support email |
-| **Google Sheets OAuth2** | Settings → Credentials → Add → Google Sheets → Connect |
-| **Slack OAuth2** | Settings → Credentials → Add → Slack → Connect với workspace |
+```javascript
+const classifications = {
+  refund: ['hoàn tiền', 'refund', 'trả lại', 'return', 'hoàn lại'],
+  question: ['hỏi', 'question', 'tư vấn', 'thông tin', 'how to'],
+  technical: ['lỗi', 'error', 'bug', 'không hoạt động', 'bị hỏng'],
+  complaint: ['khiếu nại', 'complaint', 'phàn nàn', 'tệ', 'dịch vụ kém'],
+  general: [] // everything else
+};
+```
 
 ### Bước 3: Import Workflow
 
@@ -80,123 +76,99 @@ Tạo Google Sheet với các columns:
 3. Chọn: `workflows/enterprise/04-customer-support/workflow.json`
 4. Click **Import**
 
-### Bước 4: Cấu hình Nodes
+### Bước 4: Cấu hình
 
 **1. Gmail Trigger:**
-- Set **Email** = support@yourdomain.com
-- Poll interval: Mỗi 5 phút
+- Set **Poll Interval** = Every 5 minutes
+- Gán Gmail credential
 
-**2. Parse & Classify Email:**
-- Review keywords trong Code node
-- Thêm/bớt keywords theo nhu cầu
+**2. Create Ticket:**
+- Set **Document ID** = Sheet ID của support tracker
+- Set **Sheet Name** = tên sheet
 
-**3. Create Ticket:**
-- Set **Document ID** = Sheet ID
-- Set **Sheet Name** = tên sheet tickets
+**3. Send FAQ Response:**
+- Customize FAQ template trong node
+- Gán Gmail credential
 
-**4. Send FAQ Response:**
-- Customize FAQ template theo sản phẩm/dịch vụ của bạn
-
-**5. Notify Tech Team/Manager:**
-- Set **Channel** = `#tech-support` hoặc `#urgent-tickets`
-- Customize message format
+**4. Notify Manager/Team:**
+- Set **Channel** = `#support` hoặc `#tech-support`
+- Gán Slack credential
 
 ### Bước 5: Test
 
-**Gửi test email đến support@ với các scenarios:**
-
-1. **Refund Request:**
-   ```
-   Subject: Yêu cầu hoàn tiền đơn hàng #12345
-   Body: Tôi muốn hoàn tiền cho đơn hàng #12345, số tiền 300,000đ
-   ```
-
-2. **Technical Issue:**
-   ```
-   Subject: Không đăng nhập được
-   Body: Tôi bị lỗi không đăng nhập vào tài khoản được
-   ```
-
-3. **Product Question:**
-   ```
-   Subject: Hỏi về tính năng
-   Body: Cho tôi hỏi sản phẩm X có tính năng Y không?
-   ```
+**Gửi test email:**
+- Subject: "Tôi muốn hoàn tiền" → Should classify as refund
+- Subject: "Sản phẩm bị lỗi" → Should classify as technical
+- Subject: "Cho tôi hỏi về giá" → Should classify as question
 
 **Kiểm tra:**
-1. ✅ Ticket được tạo trong Google Sheets?
-2. ✅ Email phản hồi đúng category?
-3. ✅ Slack notifications đến đúng channel?
-4. ✅ Refund < 500K được auto-approve?
+1. ✅ Phân loại đúng không?
+2. ✅ Ticket được tạo trong Sheets?
+3. ✅ Response được gửi đúng?
+4. ✅ Slack notifications có đến?
 
-## Cấu trúc dữ liệu
+## Classification Logic
 
-### Email Classification Keywords
+### Refund Request
+**Keywords:** `hoàn tiền`, `refund`, `trả lại`, `return`, `hoàn lại`
+**Action:** IF amount < 500,000 VND → Auto-approve, ELSE → Manager approval
 
-| Category | Vietnamese Keywords | English Keywords |
-|----------|-------------------|------------------|
-| Refund | hoàn tiền, trả lại, refund, hủy đơn | refund, return, cancel order |
-| Technical | lỗi, error, bug, không hoạt động, bị hỏng | error, bug, not working, broken |
-| Question | hỏi, tư vấn, thông tin, giá, mua | question, info, price, buy, how to |
-| Complaint | khiếu nại, phàn nàn, tệ, bực mình | complaint, terrible, frustrated |
-| General | *(everything else)* | *(everything else)* |
+### Product Question
+**Keywords:** `hỏi`, `question`, `tư vấn`, `thông tin`, `how to`, `giá`, `price`
+**Action:** Send FAQ response
 
-## Troubleshooting
+### Technical Issue
+**Keywords:** `lỗi`, `error`, `bug`, `không hoạt động`, `bị hỏng`, `không dùng được`
+**Action:** Create high-priority ticket, notify tech team via Slack
 
-| Lỗi | Nguyên nhân | Giải pháp |
-|-----|------------|-----------|
-| Trigger không hoạt động | Gmail credential sai | Reconnect Gmail OAuth2 |
-| Classification sai | Keywords không đủ | Thêm keywords vào Code node |
-| Ticket không tạo | Sheet ID sai | Kiểm tra Sheet ID và permissions |
-| Slack không gửi | Channel không tồn tại | Tạo channel hoặc đổi tên |
-| SLA bị vượt | Workflow chạy chậm | Tăng poll frequency |
+### Complaint
+**Keywords:** `khiếu nại`, `complaint`, `phàn nàn`, `tệ`, `dịch vụ kém`, `không hài lòng`
+**Action:** Create urgent ticket, notify manager
+
+### General
+**Action:** Send auto-reply with ticket number
 
 ## ⚠️ Lưu ý Community Version
 
-- ✅ **Gmail node** có sẵn, hoạt động tốt
+- ✅ **Gmail node** có sẵn
 - ✅ **Google Sheets node** có sẵn
-- ✅ **Slack node** có sẵn
+- ✅ **Code node** cho classification hoạt động tốt
 - ⚠️ **OAuth2 credentials** cần reconnect định kỳ
-- ⚠️ **Polling interval** tối thiểu 1 phút (có thể delay)
-- 💡 **Tip**: Dùng Google Sheets làm ticket system đơn giản. Scale lên thì dùng Zendesk/Freshdesk nodes
+- ⚠️ **Không có built-in ticket system** - dùng Google Sheets thay thế
+- 💡 **Tip**: Với volume cao (>100 tickets/day), nên dùng dedicated helpdesk software
+
+## SLA Guidelines
+
+| Priority | Response Time | Resolution Time |
+|----------|---------------|-----------------|
+| Urgent (Complaint) | < 1 hour | < 4 hours |
+| High (Technical) | < 2 hours | < 8 hours |
+| Medium (Refund) | < 4 hours | < 24 hours |
+| Low (Question/General) | < 8 hours | < 48 hours |
 
 ## Mở rộng
 
 ### Thêm AI Classification
-Dùng OpenAI/AI node để phân loại thông minh hơn:
+Dùng OpenAI để phân loại thông minh hơn:
 ```
-Gmail Trigger → AI Classification ( thay vì keyword matching)
-```
-
-### Thêm Zendesk/Freshdesk Integration
-Thay thế Google Sheets bằng ticket system chuyên nghiệp:
-```
-Classify → Create Zendesk Ticket → Assign Group
+Email → OpenAI (Classify) → Route based on AI response
 ```
 
-### Thêm Customer Satisfaction Survey
-Sau khi resolve ticket, gửi survey:
-```
-Ticket Resolved → Wait 24h → Send CSAT Survey
-                                      │
-                                      ▼
-                               Log Score to Sheets
+### Thêm Sentiment Analysis
+Phát hiện customer anger level:
+```javascript
+const angryWords = ['tức giận', 'bực mình', 'không thể chấp nhận'];
+const sentiment = angryWords.some(w => email.includes(w)) ? 'angry' : 'normal';
 ```
 
-### Thêm SLA Monitoring Workflow
-Tạo workflow riêng để monitor SLA:
+### Thêm CSAT Survey
+Gửi survey sau khi resolve:
 ```
-Schedule (every hour) → Check Open Tickets
-                              │
-                              ▼
-                    IF past deadline → Alert Manager
+Ticket resolved → Wait 1 hour → Send CSAT survey email
 ```
 
-### Thêm Knowledge Base Auto-Reply
-Dùng AI search knowledge base và generate response:
+### Integration với Live Chat
+Kết nối website chat:
 ```
-Classify as Question → Search KB → Generate AI Response
-                                          │
-                                          ▼
-                                     Send to Customer
+Website chat message → Same classification → Route to support
 ```

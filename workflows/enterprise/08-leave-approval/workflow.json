@@ -1,0 +1,293 @@
+{
+  "name": "Enterprise: Leave Approval",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "leave-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "leave-webhook",
+      "name": "Webhook (Leave Request)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "leave-approval",
+      "notes": "📝 Nhân viên gửi đơn xin nghỉ phép. Body: { employee_id, employee_name, employee_email, manager_email, start_date, end_date, leave_type, reason }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate leave request\nconst leave = $input.first().json.body || $input.first().json;\n\n// Required fields\nconst required = ['employee_id', 'employee_name', 'employee_email', 'manager_email', 'start_date', 'end_date', 'leave_type'];\nconst missing = required.filter(field => !leave[field]);\n\nif (missing.length > 0) {\n  throw new Error(`Missing fields: ${missing.join(', ')}`);\n}\n\n// Vietnamese leave types\nconst validLeaveTypes = [\n  'annual_leave',      // Phép năm\n  'unpaid_leave',      // Phép không lương\n  'sick_leave',        // Ốm\n  'maternity_leave',   // Thai sản\n  'bereavement_leave', // Tang chế\n  'personal_leave',    // Việc riêng\n  'training_leave'     // Đào tạo\n];\n\nif (!validLeaveTypes.includes(leave.leave_type)) {\n  throw new Error(`Invalid leave type. Must be one of: ${validLeaveTypes.join(', ')}`);\n}\n\n// Parse and validate dates\nconst startDate = new Date(leave.start_date);\nconst endDate = new Date(leave.end_date);\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\n\nif (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {\n  throw new Error('Invalid date format');\n}\n\nif (startDate < today) {\n  throw new Error('Start date cannot be in the past');\n}\n\nif (endDate < startDate) {\n  throw new Error('End date cannot be before start date');\n}\n\n// Calculate leave days (excluding weekends)\nlet leaveDays = 0;\nlet currentDate = new Date(startDate);\nwhile (currentDate <= endDate) {\n  const dayOfWeek = currentDate.getDay();\n  if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Exclude weekends\n    leaveDays++;\n  }\n  currentDate.setDate(currentDate.getDate() + 1);\n}\n\n// Vietnamese leave type labels\nconst leaveTypeLabels = {\n  annual_leave: 'Phép năm',\n  unpaid_leave: 'Phép không lương',\n  sick_leave: 'Ốm',\n  maternity_leave: 'Thai sản',\n  bereavement_leave: 'Tang chế',\n  personal_leave: 'Việc riêng',\n  training_leave: 'Đào tạo'\n};\n\nconst sanitized = {\n  employee_id: leave.employee_id.trim(),\n  employee_name: leave.employee_name.trim(),\n  employee_email: leave.employee_email.toLowerCase().trim(),\n  manager_email: leave.manager_email.toLowerCase().trim(),\n  start_date: leave.start_date,\n  end_date: leave.end_date,\n  start_date_formatted: startDate.toLocaleDateString('vi-VN'),\n  end_date_formatted: endDate.toLocaleDateString('vi-VN'),\n  leave_type: leave.leave_type,\n  leave_type_label: leaveTypeLabels[leave.leave_type],\n  reason: leave.reason?.trim() || 'Không có lý do',\n  leave_days: leaveDays,\n  status: 'pending',\n  request_id: `LEAVE-${Date.now()}`,\n  created_at: new Date().toISOString(),\n  timezone: 'Asia/Ho_Chi_Minh'\n};\n\nreturn [{ json: sanitized }];"
+      },
+      "id": "validate-leave",
+      "name": "Validate Leave Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Validate fields, dates, leave type. Tính số ngày nghỉ (loại trừ cuối tuần)."
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "column": "employee_id",
+              "condition": "equal",
+              "value": "={{ $json.employee_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-balance",
+      "name": "Get Leave Balance (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [750, 300],
+      "notes": "⚠️ Lấy số ngày phép còn lại từ Google Sheets. Columns: employee_id, annual_leave, unpaid_leave, sick_leave. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check leave balance and overlapping requests\nconst leave = $input.first().json;\nconst balance = $('Get Leave Balance (Google Sheets)').first().json || {};\n\n// Get remaining balance for leave type\nconst balanceField = leave.leave_type;\nconst remainingBalance = parseFloat(balance[balanceField]) || 0;\n\n// Check if sufficient balance\nconst hasBalance = remainingBalance >= leave.leave_days;\n\n// Check for overlapping leaves\nconst existingLeaves = $('Get Leave Balance (Google Sheets)').all()\n  .map(item => item.json)\n  .filter(item => item.employee_id === leave.employee_id && item.status === 'approved');\n\nlet hasOverlap = false;\nfor (const existing of existingLeaves) {\n  const existingStart = new Date(existing.start_date);\n  const existingEnd = new Date(existing.end_date);\n  const newStart = new Date(leave.start_date);\n  const newEnd = new Date(leave.end_date);\n  \n  if (newStart <= existingEnd && newEnd >= existingStart) {\n    hasOverlap = true;\n    break;\n  }\n}\n\nconst remainingAfter = hasBalance ? remainingBalance - leave.leave_days : remainingBalance;\n\nreturn [{\n  json: {\n    ...leave,\n    remaining_balance: remainingBalance,\n    remaining_after: remainingAfter,\n    has_balance: hasBalance,\n    has_overlap: hasOverlap,\n    validation_passed: hasBalance && !hasOverlap,\n    rejection_reason: !hasBalance ? 'Không đủ số ngày phép' : \n                      hasOverlap ? 'Trùng với đơn nghỉ phép đã được duyệt' : null\n  }\n}];"
+      },
+      "id": "check-balance",
+      "name": "Check Balance & Overlaps",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "notes": "Kiểm tra số ngày phép còn lại và trùng lịch. Nếu không đủ hoặc trùng → reject."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "valid-check",
+              "leftValue": "={{ $json.validation_passed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-valid",
+      "name": "IF: Valid Request?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "notes": "Nếu hợp lệ → gửi manager duyệt. Nếu không → reject ngay."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.manager_email }}",
+        "subject": "[Cần duyệt] Đơn nghỉ phép - {{ $json.employee_name }}",
+        "message": "=Kính gửi Quản lý,\n\n📝 Nhân viên {{ $json.employee_name }} đã gửi đơn xin nghỉ phép:\n\n━━━━━━━━━━━━━━━━━━━━\n📋 CHI TIẾT ĐƠN XIN NGHỈ PHÉP\n━━━━━━━━━━━━━━━━━━━━\n\nMã đơn: {{ $json.request_id }}\nNhân viên: {{ $json.employee_name }} ({{ $json.employee_id }})\nLoại nghỉ phép: {{ $json.leave_type_label }}\n\n📅 Thời gian nghỉ:\n- Từ ngày: {{ $json.start_date_formatted }}\n- Đến ngày: {{ $json.end_date_formatted }}\n- Số ngày nghỉ phép: {{ $json.leave_days }} ngày\n\n💼 Số ngày phép còn lại:\n- Hiện tại: {{ $json.remaining_balance }} ngày\n- Sau khi nghỉ: {{ $json.remaining_after }} ngày\n\n📝 Lý do:\n{{ $json.reason }}\n\n━━━━━━━━━━━━━━━━━━━━\n\nĐể phê duyệt đơn này, vui lòng reply email này với:\n- \"APPROVE\" hoặc \"Duyệt\" - Để phê duyệt\n- \"REJECT: <lý do>\" hoặc \"Từ chối: <lý do>\" - Để từ chối\n\nHoặc click vào link dưới đây (nếu có hệ thống):\nhttps://your-n8n.com/webhook/approve-leave?request_id={{ $json.request_id }}&decision=approve\nhttps://your-n8n.com/webhook/approve-leave?request_id={{ $json.request_id }}&decision=reject\n\nTrân trọng,\nHệ thống quản lý nhân sự",
+        "options": {}
+      },
+      "id": "notify-manager",
+      "name": "Send Approval Request to Manager",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1500, 150],
+      "notes": "⚠️ Gửi email cho manager duyệt đơn. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.employee_email }}",
+        "subject": "Đơn nghỉ phép bị từ chối - {{ $json.request_id }}",
+        "message": "=Kính gửi {{ $json.employee_name }},\n\n❌ Rất tiếc, đơn xin nghỉ phép của bạn không được chấp nhận.\n\n━━━━━━━━━━━━━━━━━━━━\n📋 CHI TIẾT\n━━━━━━━━━━━━━━━━━━━━\n\nMã đơn: {{ $json.request_id }}\nLoại nghỉ phép: {{ $json.leave_type_label }}\nThời gian: {{ $json.start_date_formatted }} đến {{ $json.end_date_formatted }}\n\n⚠️ Lý do từ chối:\n{{ $json.rejection_reason }}\n\n━━━━━━━━━━━━━━━━━━━━\n\nVui lòng liên hệ HR hoặc quản lý của bạn để biết thêm chi tiết.\n\nTrân trọng,\nPhòng Nhân sự",
+        "options": {}
+      },
+      "id": "notify-employee-reject",
+      "name": "Notify Employee (Rejected)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1500, 450],
+      "notes": "⚠️ Thông báo cho nhân viên đơn bị từ chối. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "request_id": "={{ $json.request_id }}",
+            "employee_id": "={{ $json.employee_id }}",
+            "employee_name": "={{ $json.employee_name }}",
+            "leave_type": "={{ $json.leave_type_label }}",
+            "start_date": "={{ $json.start_date }}",
+            "end_date": "={{ $json.end_date }}",
+            "leave_days": "={{ $json.leave_days }}",
+            "reason": "={{ $json.reason }}",
+            "status": "rejected",
+            "created_at": "={{ $json.created_at }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-rejection",
+      "name": "Log Rejection to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1750, 450],
+      "notes": "⚠️ Lưu đơn bị từ chối vào Google Sheets. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Leave request submitted for approval\",\n  \"request_id\": \"{{ $('Validate Leave Request').first().json.request_id }}\",\n  \"status\": \"pending_manager_approval\"\n}",
+        "options": {}
+      },
+      "id": "response-node",
+      "name": "Return Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2000, 300],
+      "notes": "Trả về response cho webhook caller."
+    }
+  ],
+  "connections": {
+    "Webhook (Leave Request)": {
+      "main": [
+        [
+          {
+            "node": "Validate Leave Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Leave Request": {
+      "main": [
+        [
+          {
+            "node": "Get Leave Balance (Google Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Leave Balance (Google Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Check Balance & Overlaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Balance & Overlaps": {
+      "main": [
+        [
+          {
+            "node": "IF: Valid Request?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Valid Request?": {
+      "main": [
+        [
+          {
+            "node": "Send Approval Request to Manager",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Employee (Rejected)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Approval Request to Manager": {
+      "main": [
+        [
+          {
+            "node": "Return Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Employee (Rejected)": {
+      "main": [
+        [
+          {
+            "node": "Log Rejection to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Rejection to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Return Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["enterprise", "hr", "leave-approval", "employee", "automation"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-workflow",
+    "usage": "Nhân viên gửi POST request với thông tin đơn nghỉ phép. Webhook URL: https://your-n8n.com/webhook/leave-request"
+  }
+}

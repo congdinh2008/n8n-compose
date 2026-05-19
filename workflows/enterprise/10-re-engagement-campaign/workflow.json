@@ -1,0 +1,277 @@
+{
+  "name": "Enterprise: Re-engagement Campaign",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "everyWeek",
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (Weekly Monday 9 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "notes": "⚙️ Cấu hình: Chạy thứ 2 hàng tuần lúc 9:00 AM để tìm khách hàng inactive."
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "read-customers",
+      "name": "Read Customer Database",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [500, 300],
+      "notes": "⚠️ Đọc Google Sheets customers. Columns: email, name, last_purchase, last_login, total_purchases, segment. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Segment customers by activity\nconst customers = $input.all().map(item => item.json);\nconst now = new Date();\nconst daysSinceActivity = (dateStr) => {\n  if (!dateStr) return 999;\n  const date = new Date(dateStr);\n  return Math.ceil((now - date) / (1000 * 60 * 60 * 24));\n};\n\nconst segmented = customers.map(customer => {\n  const daysSincePurchase = daysSinceActivity(customer.last_purchase);\n  const daysSinceLogin = daysSinceActivity(customer.last_login);\n  \n  let segment = 'active';\n  let campaign = 'none';\n  \n  if (daysSincePurchase > 90) {\n    segment = 'churned';\n    campaign = 'win_back';\n  } else if (daysSincePurchase > 30) {\n    segment = 'at_risk';\n    campaign = 're_engage';\n  } else {\n    segment = 'active';\n    campaign = 'nurture';\n  }\n  \n  return {\n    ...customer,\n    segment,\n    campaign,\n    days_since_purchase: daysSincePurchase,\n    days_since_login: daysSinceLogin,\n    eligible_for_campaign: campaign !== 'none' && campaign !== 'nurture'\n  };\n});\n\nconst churned = segmented.filter(c => c.campaign === 'win_back');\nconst atRisk = segmented.filter(c => c.campaign === 're_engage');\n\nconsole.log(`Segmented: ${atRisk.length} at-risk, ${churned.length} churned`);\n\nreturn [\n  ...atRisk.map(c => ({ json: c })),\n  ...churned.map(c => ({ json: c }))\n];"
+      },
+      "id": "segment-customers",
+      "name": "Segment Customers by Activity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Phân segment: active (<30 ngày), at_risk (30-90 ngày), churned (>90 ngày)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-customers",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "larger"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-customers",
+      "name": "IF: Has Customers to Re-engage?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "notes": "Nếu có customers cần re-engage → tiếp tục. Nếu không → dừng."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "churned-check",
+              "leftValue": "={{ $json.campaign }}",
+              "rightValue": "win_back",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "switch-campaign",
+      "name": "Switch: Campaign Type?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [1250, 300],
+      "notes": "Routing: win_back → email đặc biệt, re_engage → email nhắc nhở."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "Chúng tôi nhớ bạn! 🎁 Ưu đãi đặc biệt bên trong",
+        "message": "=Kính gửi {{ $json.name }},\n\n👋 Đã lâu không thấy bạn!\n\nChúng tôi nhớ bạn! Đã {{ $json.days_since_purchase }} ngày kể từ lần mua hàng cuối của bạn.\n\n━━━━━━━━━━━━━━━━━━━━\n🎁 ƯU ĐÃI DÀNH RIÊNG CHO BẠN\n━━━━━━━━━━━━━━━━━━━━\n\nGiảm 20% cho đơn hàng tiếp theo!\nMã: COMEBACK20\nHạn sử dụng: 14 ngày\n\n━━━━━━━━━━━━━━━━━━━━\n\n💡 Có rất nhiều sản phẩm mới đang chờ bạn:\n- Sản phẩm A\n- Sản phẩm B\n- Sản phẩm C\n\n👉 Mua ngay: https://yourstore.com\n\nNếu có bất kỳ câu hỏi nào, đừng ngại liên hệ với chúng tôi!\n\nTrân trọng,\nĐội ngũ CSKH",
+        "options": {}
+      },
+      "id": "send-winback",
+      "name": "Send Win-back Email (20% OFF)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1500, 150],
+      "notes": "⚠️ Gửi email win-back với discount code 20%. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "Bạn có biết...? 🤔 Cập nhật mới nhất",
+        "message": "=Kính gửi {{ $json.name }},\n\n👋 Bạn đã không ghé thăm chúng tôi {{ $json.days_since_purchase }} ngày rồi!\n\n━━━━━━━━━━━━━━━━━━━━\n📢 CÓ GÌ MỚI?\n━━━━━━━━━━━━━━━━━━━━\n\n• Sản phẩm mới ra mắt\n• Cải tiến dịch vụ\n• Chương trình khuyến mãi đặc biệt\n\n━━━━━━━━━━━━━━━━━━━━\n\n🎁 Nhận ưu đãi 10% cho lần mua hàng tiếp theo:\nMã: WELCOME10\nHạn: 7 ngày\n\n👉 Xem ngay: https://yourstore.com\n\nChúng tôi luôn ở đây nếu bạn cần hỗ trợ!\n\nTrân trọng,\nĐội ngũ CSKH",
+        "options": {}
+      },
+      "id": "send-reengage",
+      "name": "Send Re-engagement Email (10% OFF)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1500, 450],
+      "notes": "⚠️ Gửi email re-engagement với discount code 10%. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "email": "={{ $json.email }}",
+            "last_campaign": "={{ $json.campaign }}",
+            "last_campaign_date": "={{ $json.campaign_sent_at }}"
+          }
+        },
+        "options": {
+          "idColumn": "email"
+        }
+      },
+      "id": "update-campaign-log",
+      "name": "Update Campaign Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1750, 300],
+      "notes": "⚠️ Cập nhật last_campaign và last_campaign_date trong customers sheet."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Weekly Monday 9 AM)": {
+      "main": [
+        [
+          {
+            "node": "Read Customer Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Customer Database": {
+      "main": [
+        [
+          {
+            "node": "Segment Customers by Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Segment Customers by Activity": {
+      "main": [
+        [
+          {
+            "node": "IF: Has Customers to Re-engage?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Has Customers to Re-engage?": {
+      "main": [
+        [
+          {
+            "node": "Switch: Campaign Type?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: Campaign Type?": {
+      "main": [
+        [
+          {
+            "node": "Send Win-back Email (20% OFF)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Re-engagement Email (10% OFF)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Win-back Email (20% OFF)": {
+      "main": [
+        [
+          {
+            "node": "Update Campaign Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Re-engagement Email (10% OFF)": {
+      "main": [
+        [
+          {
+            "node": "Update Campaign Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["enterprise", "marketing", "re-engagement", "retention", "email-campaign"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-workflow"
+  }
+}

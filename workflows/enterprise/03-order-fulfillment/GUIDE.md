@@ -1,15 +1,16 @@
 # 📦 Enterprise: Order Fulfillment
 
 ## Mục tiêu
-Tự động hóa **quy trình xử lý đơn hàng** e-commerce:
-- Validate đơn hàng mới
-- Kiểm tra tồn kho
-- Gửi email xác nhận cho khách
-- Thông báo cho kho đóng hàng
+Tự động hóa **xử lý đơn hàng e-commerce**:
+- Nhận đơn hàng mới từ website/webhook
+- Validate và kiểm tra tồn kho
+- Gửi email xác nhận cho khách hàng
+- Thông báo kho đóng hàng qua Slack
 - Lưu đơn hàng vào Google Sheets để theo dõi
+- Xử lý trường hợp hết hàng
 
 ## Đối tượng sử dụng
-**Doanh nghiệp** - Online stores, Shopify merchants, bất kỳ ai bán hàng online.
+**Doanh nghiệp** - E-commerce teams, online stores, warehouses, bất kỳ ai cần xử lý đơn hàng tự động.
 
 ## Sơ đồ luồng
 ```
@@ -17,27 +18,24 @@ Tự động hóa **quy trình xử lý đơn hàng** e-commerce:
          │
          ▼
 [Validate Order Data]
-  (Email, phone, total)
          │
          ▼
-[Check Inventory]
-  (Google Sheets)
+[Check Inventory (Google Sheets)]
          │
-    ┌────┴────┐
-    ▼         ▼
-[IF: In Stock?]
-    │ yes     │ no
-    ▼         ▼
-[Send      [Send Out of
- Confirm   Stock Email]
- Email]
+         ▼
+    IF: In Stock?
+    │          │
+    Yes        No
+    │          │
+    ▼          ▼
+[Send      [Send Out
+ Confirm]   of Stock]
     │
     ▼
-[Notify Warehouse]
-  (Slack)
+[Notify Warehouse (Slack)]
     │
     ▼
-[Log to Google Sheets]
+[Log Order to Google Sheets]
     │
     ▼
 [Return Success Response]
@@ -48,72 +46,21 @@ Tự động hóa **quy trình xử lý đơn hàng** e-commerce:
 | Node | Type | Configuration | Credentials |
 |------|------|---------------|-------------|
 | Webhook (New Order) | Webhook | POST /webhook/new-order | None |
-| Validate Order Data | Code | Validation logic | None |
-| Check Inventory | Google Sheets | Search by product | Google Sheets OAuth2 |
-| IF: In Stock? | IF | Check if results > 0 | None |
-| Send Order Confirmation | Gmail | Vietnamese template | Gmail OAuth2 |
-| Notify Warehouse | Slack | Message to #orders | Slack OAuth2 |
-| Log Order to Sheets | Google Sheets | Append row | Google Sheets OAuth2 |
-| Send Out of Stock | Gmail | Out of stock template | Gmail OAuth2 |
-| Return Response | Respond to Webhook | JSON response | None |
+| Validate Order Data | Code | Validate + calculate total | None |
+| Check Inventory | Google Sheets | Search by product name | Google Sheets OAuth2 |
+| IF: In Stock? | IF | Check if inventory > 0 | None |
+| Send Confirmation Email | Gmail | Order confirmation template | Gmail OAuth2 |
+| Notify Warehouse | Slack | Order details to #orders | Slack OAuth2 |
+| Log Order | Google Sheets | Append row | Google Sheets OAuth2 |
+| Send Out of Stock Email | Gmail | Out of stock notification | Gmail OAuth2 |
 
 ## Cài đặt
 
-### Bước 1: Tạo Google Sheets Inventory
+### Bước 1: Cấu hình Webhook
 
-Tạo Google Sheet quản lý tồn kho:
+**Webhook URL:** `https://your-n8n-domain.com/webhook/new-order`
 
-| product_name | sku | stock | price | category |
-|--------------|-----|-------|-------|----------|
-| Áo thun nam M | ATN-M | 50 | 150000 | Clothing |
-| Áo thun nam L | ATN-L | 30 | 150000 | Clothing |
-| Quần jean 30 | QJ-30 | 20 | 350000 | Clothing |
-
-Tạo Google Sheet lưu đơn hàng:
-
-| order_id | customer_name | customer_email | customer_phone | items | total | payment_method | status | created_at |
-|----------|--------------|----------------|----------------|-------|-------|----------------|--------|------------|
-| ORD-123 | Nguyễn Văn A | a@email.com | 0901234567 | Áo thun M x2 | 300000 | COD | confirmed | 2026-05-05 |
-
-### Bước 2: Cấu hình Credentials
-
-| Credential | Hướng dẫn |
-|-----------|-----------|
-| **Google Sheets OAuth2** | Settings → Credentials → Add → Google Sheets → Connect (cho cả 2 sheets) |
-| **Gmail OAuth2** | Settings → Credentials → Add → Gmail → Connect |
-| **Slack OAuth2** | Settings → Credentials → Add → Slack → Connect |
-
-### Bước 3: Import Workflow
-
-1. Mở n8n Dashboard
-2. **Add Workflow** → **Import from File**
-3. Chọn: `workflows/enterprise/03-order-fulfillment/workflow.json`
-4. Click **Import**
-
-### Bước 4: Cấu hình Nodes
-
-**1. Check Inventory:**
-- Set **Document ID** = Sheet ID của inventory sheet
-- Set **Sheet Name** = tên sheet inventory
-
-**2. Send Order Confirmation Email:**
-- Review template email, customize theo brand của bạn
-- Gmail credential đã được gán
-
-**3. Notify Warehouse (Slack):**
-- Set **Channel** = `#orders` (hoặc channel của bạn)
-- Customize message format
-
-**4. Log Order to Google Sheets:**
-- Set **Document ID** = Sheet ID của orders sheet
-- Set **Sheet Name** = tên sheet orders
-
-**5. Send Out of Stock Email:**
-- Review template, customize nếu cần
-
-### Bước 5: Test
-
-**Test bằng curl:**
+**Request format:**
 ```bash
 curl -X POST https://your-n8n.com/webhook/new-order \
   -H "Content-Type: application/json" \
@@ -126,32 +73,82 @@ curl -X POST https://your-n8n.com/webhook/new-order \
       "address": "123 Đường ABC, Quận 1, TP.HCM"
     },
     "items": [
-      {"product": "Áo thun nam M", "qty": 2, "price": 150000}
+      { "product": "Áo thun nam", "qty": 2, "price": 150000 },
+      { "product": "Quần jean", "qty": 1, "price": 350000 }
     ],
-    "total": 300000,
+    "total": 650000,
     "payment_method": "COD"
   }'
 ```
 
-**Expected Response:**
-```json
-{
-  "success": true,
-  "message": "Order processed successfully",
-  "order_id": "ORD-001",
-  "status": "confirmed",
-  "total": 300000
-}
-```
+### Bước 2: Chuẩn bị Google Sheets
 
-**Kiểm tra:**
-1. ✅ Google Sheets inventory có được check không?
-2. ✅ Email xác nhận đã gửi cho khách?
-3. ✅ Slack #orders có message không?
-4. ✅ Đơn hàng đã được lưu vào orders sheet?
-5. ✅ Response trả về đúng không?
+**Sheet 1: Inventory**
 
-## Cấu trúc dữ liệu
+| product_name | sku | stock | price |
+|--------------|-----|-------|-------|
+| Áo thun nam | TSHIRT-001 | 50 | 150,000 |
+| Quần jean | JEANS-001 | 30 | 350,000 |
+
+**Sheet 2: Orders**
+
+| order_id | customer_name | customer_email | customer_phone | items | total | payment_method | status | created_at |
+|----------|---------------|----------------|----------------|-------|-------|----------------|--------|------------|
+| ORD-001 | Nguyễn A | a@email.com | 0901234567 | Áo thun x2, Quần x1 | 650000 | COD | confirmed | 2026-05-05 |
+
+### Bước 3: Cấu hình Credentials
+
+| Credential | Hướng dẫn |
+|-----------|-----------|
+| **Gmail OAuth2** | Settings → Credentials → Add → Gmail OAuth2 → Connect |
+| **Slack OAuth2** | Settings → Credentials → Add → Slack OAuth2 → Connect |
+| **Google Sheets OAuth2** | Settings → Credentials → Add → Google Sheets → Connect (cho cả 2 sheets) |
+
+### Bước 4: Tạo Slack Channel
+
+Tạo channel `#orders` trong Slack để nhận thông báo đơn hàng mới.
+
+### Bước 5: Import Workflow
+
+1. Mở n8n Dashboard
+2. **Add Workflow** → **Import from File**
+3. Chọn: `workflows/enterprise/03-order-fulfillment/workflow.json`
+4. Click **Import**
+
+### Bước 6: Cấu hình Nodes
+
+**1. Check Inventory (Google Sheets):**
+- Set **Document ID** = Sheet ID của Inventory sheet
+- Set **Sheet Name** = tên sheet inventory
+- Configure filter để search theo `product_name`
+
+**2. Send Order Confirmation Email:**
+- Review và customize template email
+- Thêm logo công ty (nếu cần)
+- Điều chỉnh thông tin giao hàng
+
+**3. Notify Warehouse (Slack):**
+- Set **Channel** = `#orders`
+- Customize message format
+- Gán Slack credential
+
+**4. Log Order to Google Sheets:**
+- Set **Document ID** = Sheet ID của Orders sheet
+- Set **Sheet Name** = tên sheet orders
+
+### Bước 7: Test
+
+1. Gửi test order qua curl (xem Bước 1)
+2. Kiểm tra:
+   - ✅ Email xác nhận có đến khách hàng không?
+   - ✅ Slack có message trong #orders không?
+   - ✅ Google Sheets có row mới không?
+   - ✅ Response trả về có đúng không?
+3. Test out of stock scenario:
+   - Set stock = 0 trong Inventory sheet
+   - Gửi order → Kiểm tra email out of stock
+
+## Order Data Structure
 
 ### Input (Webhook Body)
 ```json
@@ -164,62 +161,84 @@ curl -X POST https://your-n8n.com/webhook/new-order \
     "address": "123 Đường ABC, Quận 1, TP.HCM"
   },
   "items": [
-    {"product": "Áo thun nam M", "qty": 2, "price": 150000}
+    { "product": "Product Name", "qty": 2, "price": 150000 }
   ],
-  "total": 300000,
+  "total": 650000,
   "payment_method": "COD"
 }
 ```
 
-### Fields
-| Field | Required | Format | Notes |
-|-------|----------|--------|-------|
-| order_id | ✅ | String | Mã đơn hàng duy nhất |
-| customer.name | ✅ | String | Tên khách hàng |
-| customer.email | ✅ | Email | Email xác nhận |
-| customer.phone | ❌ | VN phone | 0XXXXXXXXX hoặc +84XXXXXXXXX |
-| customer.address | ❌ | String | Địa chỉ giao hàng |
-| items | ✅ | Array | Danh sách sản phẩm |
-| items[].product | ✅ | String | Tên sản phẩm (phải khớp với inventory) |
-| items[].qty | ❌ | Number | Số lượng (default: 1) |
-| items[].price | ❌ | Number | Đơn giá VND |
-| total | ❌ | Number | Tổng tiền (tự tính nếu không có) |
-| payment_method | ❌ | String | COD, Bank Transfer, MoMo, v.v. |
+### Payment Methods (Vietnamese)
+- **COD** - Cash on Delivery (Thanh toán khi nhận hàng)
+- **Bank Transfer** - Chuyển khoản ngân hàng
+- **MoMo** - Ví điện tử MoMo
+- **VNPay** - Cổng thanh toán VNPay
+- **ZaloPay** - Ví điện tử ZaloPay
+- **Credit Card** - Thẻ tín dụng
+
+### Order Status Flow
+```
+pending → confirmed → processing → shipped → delivered
+                              ↓
+                        out_of_stock
+```
+
+## Email Templates
+
+### Order Confirmation Email
+**Subject:** `Xác nhận đơn hàng #{{order_id}}`
+
+**Nội dung:**
+- Chào khách hàng
+- Chi tiết đơn hàng
+- Tổng tiền
+- Địa chỉ giao hàng
+- Thời gian giao hàng dự kiến (2-3 ngày)
+- Contact info
+
+### Out of Stock Email
+**Subject:** `Thông báo hết hàng - Đơn hàng #{{order_id}}`
+
+**Nội dung:**
+- Xin lỗi khách hàng
+- Giải thích sản phẩm hết hàng
+- Offer alternatives (sản phẩm thay thế, hoàn tiền)
+- Timeline sẽ có hàng lại
 
 ## Troubleshooting
 
 | Lỗi | Nguyên nhân | Giải pháp |
 |-----|------------|-----------|
 | Webhook 404 | URL sai hoặc workflow chưa active | Kiểm tra URL và bật workflow |
-| Không check được inventory | Sheet ID sai | Kiểm tra Sheet ID của inventory |
-| Email không gửi được | Gmail credential invalid | Reconnect Gmail OAuth2 |
-| Slack không gửi | Channel không tồn tại | Tạo channel `#orders` hoặc đổi tên |
-| Product not found | Tên sản phẩm không khớp inventory | Kiểm tra chính tả tên sản phẩm |
+| Không kiểm tra được tồn kho | Sheet ID sai | Kiểm tra Inventory sheet ID |
+| Email không gửi | Gmail credential invalid | Reconnect Gmail OAuth2 |
+| Slack không gửi | Channel #orders không tồn tại | Tạo channel trong Slack |
+| Total tính sai | Items format sai | Kiểm tra items array trong request |
+| Không log được order | Orders sheet ID sai | Kiểm tra Sheet ID và permissions |
 
 ## ⚠️ Lưu ý Community Version
 
 - ✅ **Webhook node** hoạt động tốt
-- ✅ **Google Sheets node** có sẵn
 - ✅ **Gmail/Slack nodes** có sẵn
-- ⚠️ **OAuth2 credentials** cần reconnect định kỳ
-- ⚠️ **Queue mode không available** — nếu có nhiều orders cùng lúc, có thể chậm
-- 💡 **Tip**: Với shop lớn (>100 orders/day), nên chuyển sang PostgreSQL thay vì Google Sheets
+- ✅ **Google Sheets node** có sẵn
+- ⚠️ **Inventory check** đơn giản - không handle concurrent orders tốt
+- ⚠️ **Queue mode không available** — nếu nhận nhiều orders cùng lúc, có thể chậm
+- 💡 **Tip**: Khi scale lên 100+ orders/ngày, chuyển sang database thật (PostgreSQL/MySQL)
 
 ## Mở rộng
 
-### Thêm Shopify Integration
+### Tích hợp với Shopify
 Thay vì webhook, dùng Shopify trigger:
 ```
-Shopify Trigger (New Order) → Validate → (rest of workflow)
+Shopify Trigger (New Order) → Validate → Check Inventory → ...
 ```
 
-### Thêm Shipping API (Giao Hàng Nhanh)
-Tự động tạo đơn vận chuyển:
+### Thêm Shipping Integration
+Tự động tạo shipping order:
 ```javascript
-// Sau khi confirm order
-const shipping = await fetch('https://api.giaohangnhanh.vn/v2/order/create', {
+// Gửi request đến Giao Hàng Nhanh
+const shipping = await fetch('https://api.giaohangnhanh.vn/orders', {
   method: 'POST',
-  headers: { 'Token': 'YOUR_TOKEN' },
   body: JSON.stringify({
     to_name: customer.name,
     to_phone: customer.phone,
@@ -229,33 +248,34 @@ const shipping = await fetch('https://api.giaohangnhanh.vn/v2/order/create', {
 });
 ```
 
-### Thêm Payment Verification (MoMo/VNPay)
-Xác nhận thanh toán trước khi xử lý:
+### Thêm Payment Verification
+Xác nhận thanh toán trước khi xác nhận order:
 ```
-Webhook → Check Payment Status → IF paid → Process order
-```
-
-### Thêm Inventory Auto-Update
-Tự động trừ tồn kho sau khi order:
-```
-Log Order → Update Inventory (stock = stock - qty)
+Validate → Check Payment Status → IF: Paid? → Confirm Order
 ```
 
-### Integration với Website
+### Thêm Order Tracking
+Gửi email tracking cho khách khi order được ship:
+```
+Shipping Created → Wait 1 day → Send Tracking Email
+```
 
-**HTML Checkout Form:**
+### Tích hợp với Website
+
+**HTML Form:**
 ```html
 <form action="https://your-n8n.com/webhook/new-order" method="POST">
-  <!-- Customer info -->
-  <input name="customer[name]" required>
-  <input name="customer[email]" type="email" required>
-  <input name="customer[phone]" required>
+  <input type="text" name="customer[name]" required>
+  <input type="email" name="customer[email]" required>
+  <input type="tel" name="customer[phone]">
   <textarea name="customer[address]" required></textarea>
-  
-  <!-- Cart items (hidden, populated by JS) -->
-  <input type="hidden" name="items" id="cart-items">
-  <input type="hidden" name="total" id="cart-total">
-  
+  <!-- Items would be added dynamically via JS -->
   <button type="submit">Đặt hàng</button>
 </form>
+```
+
+### Thêm Return/Refund Handling
+Workflow riêng cho xử lý trả hàng:
+```
+Webhook (/return) → Validate Return → Update Inventory → Process Refund
 ```

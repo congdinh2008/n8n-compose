@@ -1,5 +1,5 @@
 {
-  "name": "WF05 [Gemini] - Telegram AI Idea Synthesizer v1.0",
+  "name": "WF05 [DeepSeek] - Telegram AI Idea Synthesizer v2.0",
   "nodes": [
     {
       "parameters": {
@@ -127,44 +127,43 @@
           "messageValues": []
         }
       },
-      "id": "llm-chain-gemini",
-      "name": "Gemini: Analyze Idea (Chain)",
+      "id": "llm-chain-deepseek",
+      "name": "DeepSeek: Analyze Idea (Chain)",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.5,
       "position": [1120, 220],
-      "notes": "Basic LLM Chain sử dụng Gemini để phân tích ý tưởng. Output: JSON string trong $json.text."
+      "notes": "Basic LLM Chain sử dụng DeepSeek để phân tích ý tưởng. Output: JSON string trong $json.text."
     },
     {
       "parameters": {
-        "modelName": "models/gemini-2.0-flash",
+        "model": "deepseek-chat",
         "options": {
-          "maxOutputTokens": 2048,
           "temperature": 0.4
         }
       },
-      "id": "gemini-model",
-      "name": "Gemini: Flash Model",
-      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "id": "deepseek-model",
+      "name": "DeepSeek: Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
       "typeVersion": 1,
       "position": [1120, 440],
       "credentials": {
-        "googlePalmApi": {
-          "id": "REPLACE_WITH_YOUR_GEMINI_CREDENTIAL_ID",
-          "name": "Google Gemini - Class Shared"
+        "deepSeekApi": {
+          "id": "REPLACE_WITH_YOUR_DEEPSEEK_CREDENTIAL_ID",
+          "name": "DeepSeek API"
         }
       },
-      "notes": "Dùng gemini-2.0-flash cho tốc độ nhanh và chi phí thấp. Có thể đổi sang gemini-1.5-pro nếu cần chất lượng cao hơn."
+      "notes": "Dùng model DeepSeek V4 (deepseek-chat) cho tốc độ nhanh và thông minh."
     },
     {
       "parameters": {
-        "jsCode": "// Parse JSON response từ Gemini\nconst rawText = $input.first().json.text || '';\n\n// Strip markdown code blocks nếu có\nlet cleanText = rawText.trim();\nif (cleanText.startsWith('```json')) {\n  cleanText = cleanText.replace(/^```json\\n?/, '').replace(/\\n?```$/, '');\n} else if (cleanText.startsWith('```')) {\n  cleanText = cleanText.replace(/^```\\n?/, '').replace(/\\n?```$/, '');\n}\n\nlet parsed = {};\ntry {\n  parsed = JSON.parse(cleanText);\n} catch (e) {\n  // Fallback nếu parse lỗi\n  parsed = {\n    category: 'Khác',\n    summary: rawText.substring(0, 200),\n    key_points: 'Không phân tích được|Vui lòng thử lại|',\n    suggestions: 'Hãy mô tả ý tưởng rõ hơn|',\n    risks: 'Không xác định|',\n    next_steps: 'Mô tả chi tiết hơn rồi gửi lại|',\n    rating: '5',\n    telegram_reply: '⚠️ AI gặp lỗi khi phân tích. Hãy thử mô tả ý tưởng rõ ràng hơn nhé!'\n  };\n}\n\n// Lấy context từ Set node\nconst ctx = $('Set: Extract Message Data').first().json;\n\nreturn {\n  json: {\n    ...parsed,\n    user_message: ctx.user_message,\n    user_name: ctx.user_name.trim() || ctx.username,\n    username: ctx.username,\n    chat_id: ctx.chat_id,\n    message_id: ctx.message_id,\n    timestamp: ctx.timestamp,\n    date_only: ctx.date_only,\n    // Chuẩn hoá rating\n    rating: parseInt(parsed.rating) || 5\n  }\n};"
+        "jsCode": "// Parse JSON response từ DeepSeek\nconst rawText = $input.first().json.text || '';\n\n// Strip markdown code blocks nếu có\nlet cleanText = rawText.trim();\nif (cleanText.startsWith('```json')) {\n  cleanText = cleanText.replace(/^```json\\n?/, '').replace(/\\n?```$/, '');\n} else if (cleanText.startsWith('```')) {\n  cleanText = cleanText.replace(/^```\\n?/, '').replace(/\\n?```$/, '');\n}\n\nlet parsed = {};\ntry {\n  parsed = JSON.parse(cleanText);\n} catch (e) {\n  // Fallback nếu parse lỗi\n  parsed = {\n    category: 'Khác',\n    summary: rawText.substring(0, 200),\n    key_points: 'Không phân tích được|Vui lòng thử lại|',\n    suggestions: 'Hãy mô tả ý tưởng rõ hơn|',\n    risks: 'Không xác định|',\n    next_steps: 'Mô tả chi tiết hơn rồi gửi lại|',\n    rating: '5',\n    telegram_reply: '⚠️ AI gặp lỗi khi phân tích. Hãy thử mô tả ý tưởng rõ ràng hơn nhé!'\n  };\n}\n\n// Lấy context từ Set node\nconst ctx = $('Set: Extract Message Data').first().json;\n\nreturn {\n  json: {\n    ...parsed,\n    user_message: ctx.user_message,\n    user_name: ctx.user_name.trim() || ctx.username,\n    username: ctx.username,\n    chat_id: ctx.chat_id,\n    message_id: ctx.message_id,\n    timestamp: ctx.timestamp,\n    date_only: ctx.date_only,\n    // Chuẩn hoá rating\n    rating: parseInt(parsed.rating) || 5\n  }\n};"
       },
       "id": "code-parse-ai-response",
       "name": "Code: Parse AI Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1340, 220],
-      "notes": "Parse JSON từ Gemini, handle lỗi parse, merge với context user. Output chuẩn hoá cho các node phía sau."
+      "notes": "Parse JSON từ DeepSeek, handle lỗi parse, merge với context user."
     },
     {
       "parameters": {
@@ -212,7 +211,7 @@
           "name": "Google Sheets Personal"
         }
       },
-      "notes": "Ghi ý tưởng + phân tích AI vào Google Sheet. Sheet phải có đúng tên cột như mapping ở trên. ⚠️ REPLACE document ID với Sheet ID của bạn."
+      "notes": "Ghi ý tưởng + phân tích AI vào Google Sheet."
     },
     {
       "parameters": {
@@ -324,14 +323,14 @@
       "main": [
         [
           {
-            "node": "Gemini: Analyze Idea (Chain)",
+            "node": "DeepSeek: Analyze Idea (Chain)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Gemini: Analyze Idea (Chain)": {
+    "DeepSeek: Analyze Idea (Chain)": {
       "main": [
         [
           {
@@ -342,11 +341,11 @@
         ]
       ]
     },
-    "Gemini: Flash Model": {
+    "DeepSeek: Model": {
       "ai_languageModel": [
         [
           {
-            "node": "Gemini: Analyze Idea (Chain)",
+            "node": "DeepSeek: Analyze Idea (Chain)",
             "type": "ai_languageModel",
             "index": 0
           }
@@ -399,7 +398,7 @@
   },
   "meta": {
     "templateCreator": "VTI Academy — AIA-SME-2026",
-    "description": "WF05: Telegram AI chatbot tổng hợp ý tưởng hàng ngày. User gửi ý tưởng qua Telegram → Gemini phân tích (category, summary, suggestions, risks, next steps) → Lưu Google Sheets → Gửi tóm tắt + chi tiết về Telegram. Pattern: Telegram Trigger → IF → LLM Chain → Sheets → Telegram Reply."
+    "description": "WF05: Telegram AI chatbot tổng hợp ý tưởng hàng ngày. User gửi ý tưởng qua Telegram → DeepSeek phân tích → Lưu Google Sheets → Gửi tóm tắt + chi tiết về Telegram. Pattern: Telegram Trigger → IF → LLM Chain → Sheets → Telegram Reply."
   },
   "tags": [
     {
@@ -415,8 +414,8 @@
       "createdAt": "2026-05-13T00:00:00.000Z"
     },
     {
-      "name": "Gemini",
-      "createdAt": "2026-05-13T00:00:00.000Z"
+      "name": "DeepSeek",
+      "createdAt": "2026-05-15T00:00:00.000Z"
     }
   ]
 }

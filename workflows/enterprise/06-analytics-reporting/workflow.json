@@ -6,7 +6,7 @@
         "rule": {
           "interval": [
             {
-              "field": "days",
+              "field": "everyDay",
               "triggerAtHour": 9,
               "triggerAtMinute": 0
             }
@@ -14,53 +14,55 @@
         }
       },
       "id": "schedule-trigger",
-      "name": "Schedule Trigger (Daily 9 AM)",
+      "name": "Schedule Trigger (9 AM Daily)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [250, 300],
-      "notes": "⚙️ Cấu hình: Chạy hàng ngày lúc 9:00 AM để lấy báo cáo ngày hôm trước."
+      "notes": "⚙️ Cấu hình: Chạy hàng ngày lúc 9:00 AM. Đổi giờ nếu cần."
     },
     {
       "parameters": {
-        "jsCode": "// Analytics Reporting - Fetch data from multiple sources\n// Tổng hợp metrics từ các platforms\n\nconst now = new Date();\nconst yesterday = new Date(Date.now() - 86400000);\nconst dateStr = yesterday.toISOString().split('T')[0];\n\n// Initialize metrics structure\nconst metrics = {\n  date: dateStr,\n  email: { sent: 0, opens: 0, clicks: 0, unsubscribes: 0 },\n  social: { posts: 0, engagements: 0, followers_gained: 0 },\n  website: { visitors: 0, pageviews: 0, conversions: 0 },\n  ads: { spend: 0, impressions: 0, clicks: 0, ctr: 0 },\n  generated_at: now.toISOString(),\n  timezone: 'Asia/Ho_Chi_Minh'\n};\n\n// TODO: Replace with actual API calls\n// Email: SendGrid/Mailchimp API\n// Social: Twitter/LinkedIn/Facebook APIs\n// Website: Google Analytics API\n// Ads: Facebook/Google Ads API\n\nconsole.log(`Generated daily report for ${dateStr}`);\n\nreturn [{ json: metrics }];"
+        "jsCode": "// Google Analytics 4 Report\n// ⚠️ CẦN: Google Analytics API credentials (OAuth2 hoặc Service Account)\n// API Docs: https://developers.google.com/analytics/devguides/reporting/data/v1\n\n// Mock data - Thay thế bằng HTTP Request đến GA4 API thật\n// HTTP Request config:\n// Method: POST\n// URL: https://analyticsdata.googleapis.com/v1beta/properties/YOUR_PROPERTY_ID:runReport\n// Headers: Authorization: Bearer YOUR_ACCESS_TOKEN\n// Body: {\n//   \"dateRanges\": [{ \"startDate\": \"yesterday\", \"endDate\": \"yesterday\" }],\n//   \"metrics\": [{ \"name\": \"activeUsers\" }, { \"name\": \"screenPageViews\" }, { \"name\": \"bounceRate\" }],\n//   \"dimensions\": [{ \"name\": \"date\" }]\n// }\n\nconst gaData = {\n  visitors: 1250,\n  page_views: 3420,\n  bounce_rate: 42.5,\n  avg_session_duration: 185, // seconds\n  top_pages: [\n    { path: '/trang-chu', views: 890 },\n    { path: '/san-pham', views: 567 },\n    { path: '/lien-he', views: 234 }\n  ]\n};\n\nreturn [{\n  json: {\n    source: 'google_analytics',\n    date: new Date().toISOString().split('T')[0],\n    ...gaData,\n    fetched_at: new Date().toISOString(),\n    timezone: 'Asia/Ho_Chi_Minh'\n  }\n}];"
       },
-      "id": "fetch-metrics",
-      "name": "Fetch All Metrics",
+      "id": "fetch-analytics",
+      "name": "Fetch Google Analytics Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 100],
+      "notes": "⚠️ Mock data. Thay bằng HTTP Request đến GA4 API. Cần OAuth2 credential hoặc Service Account key."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Social Media Metrics\n// ⚠️ CẦN: API tokens cho từng platform\n\n// Facebook Graph API: https://developers.facebook.com/docs/graph-api\n// LinkedIn API: https://learn.microsoft.com/en-us/linkedin/\n// Twitter API: https://developer.twitter.com/en/docs/twitter-api\n\nconst socialData = {\n  facebook: {\n    followers: 5230,\n    posts: 3,\n    likes: 456,\n    shares: 89,\n    comments: 67\n  },\n  linkedin: {\n    followers: 2100,\n    posts: 5,\n    likes: 234,\n    shares: 45,\n    comments: 23\n  },\n  twitter: {\n    followers: 1890,\n    tweets: 8,\n    likes: 123,\n    retweets: 34,\n    replies: 12\n  }\n};\n\n// Calculate totals\nconst totalFollowers = socialData.facebook.followers + socialData.linkedin.followers + socialData.twitter.followers;\nconst totalEngagement = \n  socialData.facebook.likes + socialData.facebook.shares + socialData.facebook.comments +\n  socialData.linkedin.likes + socialData.linkedin.shares + socialData.linkedin.comments +\n  socialData.twitter.likes + socialData.twitter.retweets + socialData.twitter.replies;\n\nreturn [{\n  json: {\n    source: 'social_media',\n    date: new Date().toISOString().split('T')[0],\n    ...socialData,\n    total_followers: totalFollowers,\n    total_engagement: totalEngagement,\n    fetched_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "fetch-social",
+      "name": "Fetch Social Media Metrics",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [500, 300],
-      "notes": "📊 TODO: Thay thế bằng API calls thực tế. Hiện tại dùng mock data structure."
+      "notes": "⚠️ Mock data. Thay bằng HTTP Request đến Facebook/LinkedIn/Twitter APIs. Cần API tokens."
     },
     {
       "parameters": {
-        "jsCode": "// Generate formatted report\nconst metrics = $input.first().json;\n\n// Calculate totals and rates\nconst emailOpenRate = metrics.email.sent > 0 ? ((metrics.email.opens / metrics.email.sent) * 100).toFixed(2) : 0;\nconst emailClickRate = metrics.email.opens > 0 ? ((metrics.email.clicks / metrics.email.opens) * 100).toFixed(2) : 0;\nconst adCTR = metrics.ads.impressions > 0 ? ((metrics.ads.clicks / metrics.ads.impressions) * 100).toFixed(2) : 0;\n\nconst report = {\n  date: metrics.date,\n  summary: [\n    `📧 Email Marketing:`,
-    `   - Sent: ${metrics.email.sent}`,
-    `   - Open Rate: ${emailOpenRate}%`,
-    `   - Click Rate: ${emailClickRate}%`,
-    `   - Unsubscribes: ${metrics.email.unsubscribes}`,
-    ``,
-    `📱 Social Media:`,
-    `   - Posts: ${metrics.social.posts}`,
-    `   - Engagements: ${metrics.social.engagements}`,
-    `   - New Followers: ${metrics.social.followers_gained}`,
-    ``,
-    `🌐 Website:`,
-    `   - Visitors: ${metrics.website.visitors}`,
-    `   - Pageviews: ${metrics.website.pageviews}`,
-    `   - Conversions: ${metrics.website.conversions}`,
-    ``,
-    `💰 Ads:`,
-    `   - Spend: ${metrics.ads.spend.toLocaleString('vi-VN')}đ`,
-    `   - Impressions: ${metrics.ads.impressions}`,
-    `   - CTR: ${adCTR}%`
-  ].join('\\n'),\n  metrics,\n  generated_at: metrics.generated_at\n};\n\nreturn [{ json: report }];"
+        "jsCode": "// Email Campaign Stats\n// ⚠️ CẦN: SendGrid hoặc Mailchimp API key\n\n// SendGrid API: https://docs.sendgrid.com/api-reference/\n// Mailchimp API: https://mailchimp.com/developer/api/\n\nconst emailData = {\n  sends: 2450,\n  opens: 1230,\n  clicks: 456,\n  bounces: 12,\n  unsubscribes: 5,\n  spam_reports: 1,\n  open_rate: 50.2,\n  click_rate: 18.6,\n  bounce_rate: 0.5,\n  unsubscribe_rate: 0.2\n};\n\nreturn [{\n  json: {\n    source: 'email_campaign',\n    date: new Date().toISOString().split('T')[0],\n    ...emailData,\n    fetched_at: new Date().toISOString()\n  }\n}];"
       },
-      "id": "generate-report",
-      "name": "Generate Daily Report",
+      "id": "fetch-email",
+      "name": "Fetch Email Campaign Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 500],
+      "notes": "⚠️ Mock data. Thay bằng HTTP Request đến SendGrid/Mailchimp API. Cần API key."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all metrics into single report\nconst analytics = $('Fetch Google Analytics Data').first().json;\nconst social = $('Fetch Social Media Metrics').first().json;\nconst email = $('Fetch Email Campaign Stats').first().json;\n\nconst date = new Date().toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\n\n// Generate insights\nconst insights = [];\n\nif (analytics.bounce_rate > 50) insights.push('⚠️ Bounce rate cao (>50%) - Cần cải thiện landing pages');\nif (analytics.avg_session_duration < 60) insights.push('⚠️ Thời gian on-site thấp - Content chưa hấp dẫn');\nif (email.open_rate < 20) insights.push('⚠️ Email open rate thấp - Cần cải thiện subject lines');\nif (social.total_engagement < 100) insights.push('💡 Social engagement thấp - Tăng tần suất đăng bài');\n\nif (insights.length === 0) insights.push('✅ Tất cả metrics trong ngưỡng tốt!');\n\nconst report = {\n  date,\n  date_short: new Date().toISOString().split('T')[0],\n  website: {\n    visitors: analytics.visitors,\n    page_views: analytics.page_views,\n    bounce_rate: `${analytics.bounce_rate}%`,\n    avg_session: `${Math.floor(analytics.avg_session_duration / 60)}m ${analytics.avg_session_duration % 60}s`\n  },\n  social: {\n    total_followers: social.total_followers,\n    total_engagement: social.total_engagement,\n    facebook: social.facebook,\n    linkedin: social.linkedin,\n    twitter: social.twitter\n  },\n  email: {\n    sends: email.sends,\n    open_rate: `${email.open_rate}%`,\n    click_rate: `${email.click_rate}%`,\n    unsubscribes: email.unsubscribes\n  },\n  insights,\n  formatted: {\n    email_body: `BÁO CÁO ANALYTICS HÀNG NGÀY\n━━━━━━━━━━━━━━━━━━━━\n📅 Ngày: ${date}\n\n🌐 WEBSITE\n━━━━━━━━━━━━━━━━━━━━\n👥 Visitors: ${analytics.visitors.toLocaleString('vi-VN')}\n📄 Page Views: ${analytics.page_views.toLocaleString('vi-VN')}\n📊 Bounce Rate: ${analytics.bounce_rate}%\n⏱️ Avg Session: ${Math.floor(analytics.avg_session_duration / 60)}m ${analytics.avg_session_duration % 60}s\n\n📱 SOCIAL MEDIA\n━━━━━━━━━━━━━━━━━━━━\n👥 Total Followers: ${social.total_followers.toLocaleString('vi-VN')}\n💬 Total Engagement: ${social.total_engagement.toLocaleString('vi-VN')}\n\n📧 EMAIL CAMPAIGN\n━━━━━━━━━━━━━━━━━━━━\n📤 Sends: ${email.sends.toLocaleString('vi-VN')}\n📬 Open Rate: ${email.open_rate}%\n🖱️ Click Rate: ${email.click_rate}%\n❌ Unsubscribes: ${email.unsubscribes}\n\n💡 INSIGHTS\n━━━━━━━━━━━━━━━━━━━━\n${insights.join('\\n')}\n\n━━━━━━━━━━━━━━━━━━━━\nTự động tạo bởi n8n Workflow`,\n    slack_body: `📊 *Daily Analytics Report - ${date}*\n\n🌐 *Website*\n👥 Visitors: ${analytics.visitors.toLocaleString('vi-VN')}\n📄 Page Views: ${analytics.page_views.toLocaleString('vi-VN')}\n📊 Bounce Rate: ${analytics.bounce_rate}%\n\n📱 *Social Media*\n👥 Followers: ${social.total_followers.toLocaleString('vi-VN')}\n💬 Engagement: ${social.total_engagement.toLocaleString('vi-VN')}\n\n📧 *Email*\n📤 Sends: ${email.sends.toLocaleString('vi-VN')}\n📬 Open Rate: ${email.open_rate}%\n🖱️ Click Rate: ${email.click_rate}%\n\n💡 *Insights*\n${insights.join('\\n')}`\n  }\n};\n\nreturn [{ json: report }];"
+      },
+      "id": "aggregate-report",
+      "name": "Aggregate & Generate Report",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [750, 300],
-      "notes": "Tạo báo cáo formatted với tất cả metrics. Tính rates và percentages."
+      "notes": "Tổng hợp data từ 3 sources, tạo insights tự động, format report cho email và Slack."
     },
     {
       "parameters": {
@@ -78,98 +80,124 @@
         "columns": {
           "mappingMode": "autoMapInputData",
           "value": {
-            "date": "={{ $json.date }}",
-            "email_sent": "={{ $json.metrics.email.sent }}",
-            "email_opens": "={{ $json.metrics.email.opens }}",
-            "email_clicks": "={{ $json.metrics.email.clicks }}",
-            "social_posts": "={{ $json.metrics.social.posts }}",
-            "social_engagements": "={{ $json.metrics.social.engagements }}",
-            "website_visitors": "={{ $json.metrics.website.visitors }}",
-            "website_conversions": "={{ $json.metrics.website.conversions }}",
-            "ads_spend": "={{ $json.metrics.ads.spend }}"
+            "date": "={{ $json.date_short }}",
+            "visitors": "={{ $json.website.visitors }}",
+            "page_views": "={{ $json.website.page_views }}",
+            "bounce_rate": "={{ $json.website.bounce_rate }}",
+            "social_followers": "={{ $json.social.total_followers }}",
+            "social_engagement": "={{ $json.social.total_engagement }}",
+            "email_sends": "={{ $json.email.sends }}",
+            "email_open_rate": "={{ $json.email.open_rate }}",
+            "insights": "={{ $json.insights.join('; ') }}"
           }
         },
         "options": {}
       },
-      "id": "log-to-sheets",
-      "name": "Log to Google Sheets",
+      "id": "save-sheets",
+      "name": "Save Report to Google Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [1000, 300],
-      "notes": "⚠️ Lưu metrics hàng ngày vào Google Sheets để theo dõi trend. Cần Sheet ID."
-    },
-    {
-      "parameters": {
-        "channel": "#marketing-reports",
-        "text": "📊 *Daily Marketing Report - {{ $json.date }}*\\n\\n{{ $json.summary }}\\n\\n_Xem chi tiết trong Google Sheets_",
-        "otherOptions": {}
-      },
-      "id": "send-slack",
-      "name": "Send Report to Slack",
-      "type": "n8n-nodes-base.slack",
-      "typeVersion": 2,
-      "position": [1250, 150],
-      "notes": "⚠️ Gửi báo cáo tới Slack channel #marketing-reports. Cần Slack OAuth2."
+      "position": [1000, 150],
+      "notes": "⚠️ Lưu report vào Google Sheets để theo dõi trends. Cần Sheet ID."
     },
     {
       "parameters": {
         "sendTo": "",
-        "subject": "📊 Daily Marketing Report - {{ $json.date }}",
-        "message": "=Chào team,\n\nĐây là báo cáo marketing hàng ngày:\n\n{{ $json.summary }}\n\n━━━━━━━━━━━━━━━━━━━━\n\nXem chi tiết tại: [Google Sheets Link]\n\nTrân trọng,\nMarketing Automation",
+        "subject": "📊 Báo cáo Analytics hàng ngày - {{ $json.date_short }}",
+        "message": "={{ $json.formatted.email_body }}",
         "options": {}
       },
       "id": "send-email",
-      "name": "Send Report via Email",
+      "name": "Send Email Report",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
-      "position": [1250, 450],
-      "notes": "⚠️ Gửi báo cáo qua email. Điền email team vào 'sendTo'. Cần Gmail OAuth2."
+      "position": [1000, 400],
+      "notes": "⚠️ Gửi báo cáo cho management team. Điền email vào 'sendTo'. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "channel": "#analytics",
+        "text": "={{ $json.formatted.slack_body }}",
+        "otherOptions": {}
+      },
+      "id": "send-slack",
+      "name": "Send Slack Report",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1000, 650],
+      "notes": "⚠️ Gửi báo cáo lên Slack channel #analytics. Cần Slack OAuth."
     }
   ],
   "connections": {
-    "Schedule Trigger (Daily 9 AM)": {
+    "Schedule Trigger (9 AM Daily)": {
       "main": [
         [
           {
-            "node": "Fetch All Metrics",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Fetch All Metrics": {
-      "main": [
-        [
-          {
-            "node": "Generate Daily Report",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Generate Daily Report": {
-      "main": [
-        [
-          {
-            "node": "Log to Google Sheets",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Log to Google Sheets": {
-      "main": [
-        [
-          {
-            "node": "Send Report to Slack",
+            "node": "Fetch Google Analytics Data",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Send Report via Email",
+            "node": "Fetch Social Media Metrics",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Email Campaign Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Google Analytics Data": {
+      "main": [
+        [
+          {
+            "node": "Aggregate & Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Social Media Metrics": {
+      "main": [
+        [
+          {
+            "node": "Aggregate & Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Email Campaign Stats": {
+      "main": [
+        [
+          {
+            "node": "Aggregate & Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate & Generate Report": {
+      "main": [
+        [
+          {
+            "node": "Save Report to Google Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Email Report",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Slack Report",
             "type": "main",
             "index": 0
           }
@@ -184,7 +212,7 @@
     "timezone": "Asia/Ho_Chi_Minh"
   },
   "staticData": null,
-  "tags": ["enterprise", "analytics", "reporting", "marketing", "automation"],
+  "tags": ["enterprise", "analytics", "reporting", "daily", "dashboard"],
   "triggerCount": 1,
   "versionId": "1.0.0",
   "meta": {

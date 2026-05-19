@@ -1,0 +1,274 @@
+{
+  "name": "Gmail → Telegram Daily Report (V4 DeepSeek)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "triggerAtHour": 7, "triggerAtMinute": 0 }] }
+      },
+      "id": "schedule-trigger",
+      "name": "⏰ Trigger 7h Sáng",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 100,
+        "filters": { "q": "is:unread newer_than:1d" },
+        "options": {}
+      },
+      "id": "gmail-get",
+      "name": "📬 Lấy Email (100)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [480, 500],
+      "credentials": {
+        "gmailOAuth2": { "id": "REPLACE_GMAIL_CRED_ID", "name": "Gmail OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = $input.all();\nconst SPAM_PATTERNS = ['shopee','lazada','tiki','grab','noreply','no-reply','donotreply','unsubscribe'];\nconst PROMO_KW = ['giảm giá','flash sale','khuyến mãi','ưu đãi','% off','sale','voucher','coupon'];\n\nconst preClassified = emails.map(item => {\n  const e = item.json;\n  const from = (e.from || '').toLowerCase();\n  const subject = (e.subject || '').toLowerCase();\n  const isSpam = SPAM_PATTERNS.some(p => from.includes(p));\n  const isPromo = PROMO_KW.some(kw => subject.includes(kw));\n  return {\n    id: e.id,\n    from: (e.from || '').replace(/<[^>]+>/g, '').trim(),\n    subject: e.subject || '(no subject)',\n    snippet: (e.snippet || e.textPlain || '').substring(0, 200),\n    date: e.date,\n    pre_category: isSpam ? 'spam' : isPromo ? 'promotion' : 'needs_ai_review'\n  };\n});\n\nconst needsReview = preClassified.filter(e => e.pre_category === 'needs_ai_review');\nconst obviousSpam = preClassified.filter(e => e.pre_category === 'spam');\nconst obviousPromo = preClassified.filter(e => e.pre_category === 'promotion');\n\nconsole.log(`Pre-classify: ${obviousSpam.length} spam, ${obviousPromo.length} promo, ${needsReview.length} → DeepSeek`);\n\nreturn [{ json: {\n  all_emails: preClassified,\n  needs_ai_review: needsReview,\n  obvious_spam: obviousSpam,\n  obvious_promo: obviousPromo,\n  total: emails.length\n} }];"
+      },
+      "id": "pre-classify",
+      "name": "🔍 Pre-Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 500],
+      "notes": "Phân loại nhanh bằng rules trước khi gọi DeepSeek. Giảm số token cần xử lý."
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst emailsForAI = data.needs_ai_review;\n\nif (emailsForAI.length === 0) {\n  return [{ json: { skip_ai: true, ...data } }];\n}\n\nconst emailList = emailsForAI.map((e, i) =>\n  `[${i+1}] From: ${e.from}\\nSubject: ${e.subject}\\nSnippet: ${e.snippet}`\n).join('\\n---\\n');\n\nconst systemPrompt = `Bạn là trợ lý quản lý email thông minh. Phân loại email vào: IMPORTANT (sếp/KH/deadline), WORK (công việc bình thường), PERSONAL (cá nhân/gia đình), NEWSLETTER (bản tin), SPAM (rác/quảng cáo). Chỉ trả về JSON array.`;\n\nconst userPrompt = `Phân loại các email sau:\\n${emailList}\\n\\nJSON array format: [{\"index\":1,\"category\":\"IMPORTANT\",\"reason_vi\":\"lý do ngắn\",\"action\":\"keep_urgent\",\"priority\":\"high\"}]\\n\\nAction values: keep_urgent/keep/archive/trash\\nChỉ trả JSON, không giải thích.`;\n\nreturn [{ json: { systemPrompt, userPrompt, emails_for_ai: emailsForAI, pre_data: data } }];"
+      },
+      "id": "prepare-prompt",
+      "name": "🤖 Chuẩn Bị DeepSeek Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 400],
+      "notes": "Tách system/user prompt riêng biệt - chuẩn OpenAI chat format mà DeepSeek dùng."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [{
+            "id": "skip-check",
+            "leftValue": "={{ $json.skip_ai }}",
+            "rightValue": true,
+            "operator": { "type": "boolean", "operation": "equals" }
+          }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-need-ai",
+      "name": "IF: Cần Gọi DeepSeek?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1200, 400],
+      "notes": "Bỏ qua API call nếu không có email cần phân tích → tiết kiệm tiền."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.deepseek.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"deepseek-chat\",\n  \"messages\": [\n    { \"role\": \"system\", \"content\": \"{{ $json.systemPrompt }}\" },\n    { \"role\": \"user\", \"content\": \"{{ $json.userPrompt }}\" }\n  ],\n  \"temperature\": 0.1,\n  \"max_tokens\": 2048,\n  \"response_format\": { \"type\": \"json_object\" }\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "call-deepseek",
+      "name": "🔵 Gọi DeepSeek API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_DEEPSEEK_CRED_ID",
+          "name": "DeepSeek API Key (Bearer)"
+        }
+      },
+      "notes": "⚠️ SECURITY: Dùng HTTP Header Auth credential. Header Name: Authorization, Value: Bearer YOUR_KEY. API tương thích OpenAI format. Model: deepseek-chat (rẻ) hoặc deepseek-reasoner (suy luận sâu hơn)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse DeepSeek response (OpenAI-compatible format)\nconst dsResponse = $input.first().json;\nconst prevData = $('🤖 Chuẩn Bị DeepSeek Prompt').first().json;\n\nlet aiResults = [];\ntry {\n  // DeepSeek trả về chuẩn OpenAI format\n  const rawText = dsResponse.choices?.[0]?.message?.content || '[]';\n  console.log('DeepSeek raw:', rawText.substring(0, 200));\n\n  // Parse JSON - DeepSeek với json_object mode trả object hoặc array\n  let parsed = JSON.parse(rawText);\n  // Nếu trả về object có key là array\n  if (!Array.isArray(parsed)) {\n    parsed = Object.values(parsed).find(v => Array.isArray(v)) || [];\n  }\n  aiResults = parsed;\n} catch(e) {\n  console.error('DeepSeek parse error:', e.message);\n  aiResults = (prevData.emails_for_ai || []).map((_, i) => ({\n    index: i + 1, category: 'WORK', action: 'keep',\n    priority: 'medium', reason_vi: 'Không thể parse AI response'\n  }));\n}\n\n// Gắn kết quả AI vào email\nconst emailsForAI = prevData.emails_for_ai || [];\nconst aiClassified = aiResults.map(r => ({\n  ...emailsForAI[r.index - 1],\n  category: r.category,\n  action: r.action,\n  priority: r.priority,\n  reason: r.reason_vi,\n  classified_by: 'deepseek'\n})).filter(Boolean);\n\n// Merge với pre-classified\nconst preData = prevData.pre_data;\nconst allEmails = [\n  ...aiClassified,\n  ...(preData.obvious_spam || []).map(e => ({ ...e, category: 'SPAM', action: 'trash', priority: 'low', classified_by: 'rule' })),\n  ...(preData.obvious_promo || []).map(e => ({ ...e, category: 'PROMOTION', action: 'archive', priority: 'low', classified_by: 'rule' }))\n];\n\nconst grouped = {\n  important: allEmails.filter(e => e.category === 'IMPORTANT'),\n  work: allEmails.filter(e => e.category === 'WORK'),\n  personal: allEmails.filter(e => e.category === 'PERSONAL'),\n  newsletter: allEmails.filter(e => e.category === 'NEWSLETTER'),\n  promotion: allEmails.filter(e => ['PROMOTION','promotion'].includes(e.category)),\n  spam: allEmails.filter(e => ['SPAM','spam'].includes(e.category))\n};\n\n// Log usage (DeepSeek trả về usage stats)\nconst usage = dsResponse.usage || {};\nconsole.log(`DeepSeek tokens: ${usage.prompt_tokens || 0} prompt + ${usage.completion_tokens || 0} completion`);\n\nreturn [{ json: { grouped, all: allEmails, total: preData.total || allEmails.length, ds_usage: usage } }];"
+      },
+      "id": "parse-deepseek",
+      "name": "🔗 Parse Kết Quả DeepSeek",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 300],
+      "notes": "DeepSeek dùng OpenAI format: choices[0].message.content. Có log token usage để theo dõi chi phí."
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst { grouped, total, ds_usage } = data;\n\nconst dateStr = new Date().toLocaleDateString('vi-VN', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  timeZone: 'Asia/Ho_Chi_Minh'\n});\n\nconst fmtSection = (arr, max = 3) => {\n  if (!arr || arr.length === 0) return '_Không có_';\n  const items = arr.slice(0, max).map((e, i) => {\n    const tag = e.classified_by === 'deepseek' ? '🔵' : e.classified_by === 'ai' ? '🤖' : '⚡';\n    const reason = e.reason ? ` _(${e.reason})_` : '';\n    return `  ${i+1}. *${(e.subject||'').substring(0, 50)}*${reason}\\n     📤 ${(e.from||'').substring(0, 38)} ${tag}`;\n  }).join('\\n');\n  const more = arr.length > max ? `\\n  _... +${arr.length - max} email_` : '';\n  return items + more;\n};\n\nconst urgentEmails = (grouped.important || []).filter(e => e.priority === 'high');\nconst urgentSection = urgentEmails.length > 0\n  ? `\\n🚨 *CẦN XỬ LÝ NGAY:*\\n${fmtSection(urgentEmails)}`\n  : '';\n\nconst cleanupCount = (grouped.spam?.length || 0) + (grouped.promotion?.length || 0);\nconst toTrashIds = (grouped.spam || []).map(e => e.id).filter(Boolean);\nconst toArchiveIds = (grouped.promotion || []).map(e => e.id).filter(Boolean);\n\n// Token cost estimate (deepseek-chat: ~$0.14/1M input, $0.28/1M output)\nconst inputCost = ((ds_usage?.prompt_tokens || 0) / 1_000_000 * 0.14).toFixed(5);\nconst outputCost = ((ds_usage?.completion_tokens || 0) / 1_000_000 * 0.28).toFixed(5);\nconst costInfo = ds_usage?.total_tokens\n  ? `\\n💰 Token: ${ds_usage.total_tokens} (~$${(+inputCost + +outputCost).toFixed(5)})`\n  : '';\n\nconst mainReport = `🔵 *BÁO CÁO EMAIL - DEEPSEEK AI*\n📅 ${dateStr}\n━━━━━━━━━━━━━━━━━━━━━━\n\n📊 *Thống kê:*\n• ⭐ Quan trọng: ${grouped.important?.length || 0}\n• 💼 Công việc: ${grouped.work?.length || 0}\n• 👤 Cá nhân: ${grouped.personal?.length || 0}\n• 📰 Newsletter: ${grouped.newsletter?.length || 0}\n• 🏷️ Khuyến mãi: ${grouped.promotion?.length || 0}\n• 🗑️ Spam: ${grouped.spam?.length || 0}\n• 📨 *Tổng: ${total} email*\n${urgentSection}\n━━━━━━━━━━━━━━━━━━━━━━\n\n⭐ *QUAN TRỌNG:*\n${fmtSection(grouped.important)}\n\n💼 *CÔNG VIỆC:*\n${fmtSection(grouped.work)}\n\n👤 *CÁ NHÂN:*\n${fmtSection(grouped.personal)}\n━━━━━━━━━━━━━━━━━━━━━━\n🧹 Tự động dọn: *${cleanupCount} email*\n🔵 Phân tích bởi DeepSeek${costInfo}`;\n\nreturn [{ json: { mainReport, toTrashIds, toArchiveIds, grouped, total } }];"
+      },
+      "id": "format-report",
+      "name": "📊 Tạo Báo Cáo DeepSeek",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 300],
+      "notes": "Báo cáo giống V3 nhưng thêm ký hiệu 🔵 cho DeepSeek và hiển thị token cost estimate."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.mainReport }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "send-telegram",
+      "name": "📱 Gửi Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2160, 200],
+      "credentials": {
+        "telegramApi": { "id": "REPLACE_TELEGRAM_CRED_ID", "name": "Telegram Bot" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const report = $('📊 Tạo Báo Cáo DeepSeek').first().json;\nconst toTrashIds = report.toTrashIds || [];\nconst toArchiveIds = report.toArchiveIds || [];\n\nif (toTrashIds.length === 0 && toArchiveIds.length === 0) {\n  return [{ json: { nothing_to_clean: true } }];\n}\n\nconst tasks = [\n  ...toTrashIds.map(id => ({ emailId: id, action: 'trash' })),\n  ...toArchiveIds.map(id => ({ emailId: id, action: 'archive' }))\n];\nreturn tasks.map(t => ({ json: t }));"
+      },
+      "id": "prepare-cleanup",
+      "name": "🧹 Chuẩn Bị Dọn Dẹp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [{
+            "id": "is-trash",
+            "leftValue": "={{ $json.action }}",
+            "rightValue": "trash",
+            "operator": { "type": "string", "operation": "equals" }
+          }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-trash-archive",
+      "name": "IF: Trash hay Archive?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2400, 400]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "trash",
+        "messageId": "={{ $json.emailId }}",
+        "options": {}
+      },
+      "id": "trash-email",
+      "name": "🗑️ Xóa Spam",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2640, 300],
+      "credentials": {
+        "gmailOAuth2": { "id": "REPLACE_GMAIL_CRED_ID", "name": "Gmail OAuth2" }
+      },
+      "notes": "⚠️ THẬN TRỌNG: Test kỹ với pinData trước khi bật production!"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "archive",
+        "messageId": "={{ $json.emailId }}",
+        "options": {}
+      },
+      "id": "archive-promo",
+      "name": "📁 Archive Promo",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2640, 500],
+      "credentials": {
+        "gmailOAuth2": { "id": "REPLACE_GMAIL_CRED_ID", "name": "Gmail OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const report = $('📊 Tạo Báo Cáo DeepSeek').first().json;\nconsole.log(`✅ V4 DeepSeek completed. Total: ${report.total}, Trashed: ${report.toTrashIds?.length || 0}, Archived: ${report.toArchiveIds?.length || 0}`);\nreturn [{ json: {\n  status: 'completed',\n  workflow_version: 'v4-deepseek',\n  total_processed: report.total,\n  trashed: report.toTrashIds?.length || 0,\n  archived: report.toArchiveIds?.length || 0,\n  finished_at: new Date().toISOString()\n} }];"
+      },
+      "id": "final-log",
+      "name": "✅ Log Hoàn Tất",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2880, 400]
+    }
+  ],
+  "connections": {
+    "⏰ Trigger 7h Sáng": { "main": [[{ "node": "📬 Lấy Email (100)", "type": "main", "index": 0 }]] },
+    "📬 Lấy Email (100)": { "main": [[{ "node": "🔍 Pre-Classification", "type": "main", "index": 0 }]] },
+    "🔍 Pre-Classification": { "main": [[{ "node": "🤖 Chuẩn Bị DeepSeek Prompt", "type": "main", "index": 0 }]] },
+    "🤖 Chuẩn Bị DeepSeek Prompt": { "main": [[{ "node": "IF: Cần Gọi DeepSeek?", "type": "main", "index": 0 }]] },
+    "IF: Cần Gọi DeepSeek?": {
+      "main": [
+        [{ "node": "📊 Tạo Báo Cáo DeepSeek", "type": "main", "index": 0 }],
+        [{ "node": "🔵 Gọi DeepSeek API", "type": "main", "index": 0 }]
+      ]
+    },
+    "🔵 Gọi DeepSeek API": { "main": [[{ "node": "🔗 Parse Kết Quả DeepSeek", "type": "main", "index": 0 }]] },
+    "🔗 Parse Kết Quả DeepSeek": { "main": [[{ "node": "📊 Tạo Báo Cáo DeepSeek", "type": "main", "index": 0 }]] },
+    "📊 Tạo Báo Cáo DeepSeek": {
+      "main": [
+        [{ "node": "📱 Gửi Telegram", "type": "main", "index": 0 }],
+        [{ "node": "🧹 Chuẩn Bị Dọn Dẹp", "type": "main", "index": 0 }]
+      ]
+    },
+    "🧹 Chuẩn Bị Dọn Dẹp": { "main": [[{ "node": "IF: Trash hay Archive?", "type": "main", "index": 0 }]] },
+    "IF: Trash hay Archive?": {
+      "main": [
+        [{ "node": "🗑️ Xóa Spam", "type": "main", "index": 0 }],
+        [{ "node": "📁 Archive Promo", "type": "main", "index": 0 }]
+      ]
+    },
+    "🗑️ Xóa Spam": { "main": [[{ "node": "✅ Log Hoàn Tất", "type": "main", "index": 0 }]] },
+    "📁 Archive Promo": { "main": [[{ "node": "✅ Log Hoàn Tất", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {
+    "📬 Lấy Email (100)": [
+      { "json": { "id": "ds-demo-1", "from": "CEO <ceo@company.com>", "subject": "Họp board Q2 - Cần confirm lịch", "date": "2026-05-11T06:45:00Z", "snippet": "Anh/chị có thể confirm lịch họp board Q2 vào 3pm thứ 6 không?" } },
+      { "json": { "id": "ds-demo-2", "from": "Client VIP <director@bigcorp.vn>", "subject": "Contract renewal - cần ký trước 30/5", "date": "2026-05-11T06:30:00Z", "snippet": "Hợp đồng cần ký trước ngày 30/5, budget 500M." } },
+      { "json": { "id": "ds-demo-3", "from": "Dev Team <dev@company.com>", "subject": "Production bug - user login broken", "date": "2026-05-11T06:00:00Z", "snippet": "Critical bug: users can't login since 6am. Need urgent fix." } },
+      { "json": { "id": "ds-demo-4", "from": "Medium <noreply@medium.com>", "subject": "Your weekly reading list", "date": "2026-05-11T05:30:00Z", "snippet": "Top stories this week. Unsubscribe from this newsletter." } },
+      { "json": { "id": "ds-demo-5", "from": "Shopee <deals@shopee.vn>", "subject": "Flash Sale Mega 6.6 - Giảm 70%!", "date": "2026-05-11T05:00:00Z", "snippet": "Ưu đãi khủng mừng 6.6, giảm giá sốc 70% hàng nghìn sản phẩm!" } },
+      { "json": { "id": "ds-demo-6", "from": "Mom <mom@gmail.com>", "subject": "Chủ nhật về nhà ăn cơm nha con", "date": "2026-05-11T04:30:00Z", "snippet": "Mẹ nấu bún bò, chủ nhật về nhé." } }
+    ]
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "tags": ["personal", "gmail", "telegram", "daily-report", "v4-deepseek", "deepseek", "spam-cleanup"],
+  "meta": {
+    "usage": "V4 DEEPSEEK: 13 nodes. Thay Gemini bằng DeepSeek API (OpenAI-compatible). Rẻ hơn, nhanh hơn với email tiếng Việt.",
+    "difficulty": "⭐⭐⭐⭐ Advanced",
+    "nodes_count": 13,
+    "setup_time": "45 phút",
+    "ai_model": "deepseek-chat (hoặc deepseek-reasoner)",
+    "api_endpoint": "https://api.deepseek.com/v1/chat/completions",
+    "api_format": "OpenAI-compatible",
+    "security_notes": "Dùng HTTP Header Auth credential với Bearer token. KHÔNG hardcode API key."
+  }
+}

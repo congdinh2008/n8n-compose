@@ -1,0 +1,214 @@
+{
+  "name": "Enterprise: Invoice Generation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 10,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (Monthly)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "notes": "⚙️ Cấu hình: Chạy ngày 25 hàng tháng lúc 10:00 AM để generate invoices cho tháng sau."
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "get-billable-items",
+      "name": "Get Billable Items (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [500, 300],
+      "notes": "⚠️ Đọc Google Sheets chứa billable items. Columns: client, service, quantity, rate, amount, status. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Group billable items by client\nconst items = $input.all().map(item => item.json);\n\nconst clients = {};\n\nitems.forEach(item => {\n  if (item.status !== 'billable') return;\n  \n  const clientId = item.client_id || item.client;\n  if (!clients[clientId]) {\n    clients[clientId] = {\n      client_id: clientId,\n      client_name: item.client_name || item.client,\n      client_email: item.client_email || '',\n      client_address: item.client_address || '',\n      tax_code: item.tax_code || '',\n      items: [],\n      subtotal: 0,\n      tax_rate: item.tax_rate || 0.10, // 10% VAT default\n      total: 0\n    };\n  }\n  \n  clients[clientId].items.push({\n    service: item.service || item.description,\n    quantity: parseInt(item.quantity) || 1,\n    rate: parseFloat(item.rate) || 0,\n    amount: parseFloat(item.amount) || 0\n  });\n  \n  clients[clientId].subtotal += parseFloat(item.amount) || 0;\n});\n\n// Calculate totals\nObject.values(clients).forEach(client => {\n  client.tax_amount = client.subtotal * client.tax_rate;\n  client.total = client.subtotal + client.tax_amount;\n  client.invoice_number = `INV-${Date.now()}-${client.client_id.substring(0, 3).toUpperCase()}`;\n  client.invoice_date = new Date().toISOString().split('T')[0];\n  client.due_date = new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0]; // 30 days\n});\n\nconst clientList = Object.values(clients);\nconsole.log(`Generated ${clientList.length} invoices`);\n\nreturn clientList.map(client => ({ json: client }));"
+      },
+      "id": "group-by-client",
+      "name": "Group by Client & Calculate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Group items theo client, tính subtotal, VAT 10%, total. Tạo invoice number unique."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format invoice email tiếng Việt\nconst invoice = $input.first().json;\n\nconst lineItems = invoice.items.map((item, i) => {\n  return `${i + 1}. ${item.service}\\n   Số lượng: ${item.quantity} x Đơn giá: ${item.rate.toLocaleString('vi-VN')}đ = ${item.amount.toLocaleString('vi-VN')}đ`;\n}).join('\\n\\n');\n\nconst email = {\n  to: invoice.client_email,\n  subject: `Hóa đơn #${invoice.invoice_number} - ${invoice.invoice_date}`,\n  body: `Kính gửi ${invoice.client_name},\\n\\nCảm ơn quý khách đã sử dụng dịch vụ của chúng tôi!\\n\\n━━━━━━━━━━━━━━━━━━━━\n📄 HÓA ĐƠN\n━━━━━━━━━━━━━━━━━━━━\n\nMã hóa đơn: #${invoice.invoice_number}\nNgày: ${invoice.invoice_date}\nHạn thanh toán: ${invoice.due_date}\n\n━━━━━━━━━━━━━━━━━━━━\n📋 CHI TIẾT DỊCH VỤ\n━━━━━━━━━━━━━━━━━━━━\n\n${lineItems}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 THANH TOÁN\n━━━━━━━━━━━━━━━━━━━━\n\nTạm tính: ${invoice.subtotal.toLocaleString('vi-VN')}đ\nThuế VAT (10%): ${invoice.tax_amount.toLocaleString('vi-VN')}đ\n\n💵 TỔNG CỘNG: ${invoice.total.toLocaleString('vi-VN')}đ\n\n━━━━━━━━━━━━━━━━━━━━\n🏦 THÔNG TIN THANH TOÁN\n━━━━━━━━━━━━━━━━━━━━\n\nNgân hàng: [Tên ngân hàng]\nSố tài khoản: [Số tài khoản]\nChủ tài khoản: [Tên công ty]\nNội dung chuyển khoản: ${invoice.invoice_number}\n\n━━━━━━━━━━━━━━━━━━━━\n\nQuý khách vui lòng thanh toán trước hạn thanh toán.\nNếu có thắc mắc, vui lòng liên hệ kế toán.\n\nTrân trọng,\nPhòng Kế toán`,\n  invoice_data: invoice\n};\n\nreturn [{ json: email }];"
+      },
+      "id": "format-invoice",
+      "name": "Format Invoice Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "notes": "Tạo email hóa đơn tiếng Việt với chi tiết dịch vụ và thông tin thanh toán."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "send-invoice-email",
+      "name": "Send Invoice Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1250, 150],
+      "notes": "⚠️ Gửi email hóa đơn cho khách hàng. Cần Gmail OAuth."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "invoice_number": "={{ $json.invoice_data.invoice_number }}",
+            "client_name": "={{ $json.invoice_data.client_name }}",
+            "client_email": "={{ $json.invoice_data.client_email }}",
+            "subtotal": "={{ $json.invoice_data.subtotal }}",
+            "tax_amount": "={{ $json.invoice_data.tax_amount }}",
+            "total": "={{ $json.invoice_data.total }}",
+            "invoice_date": "={{ $json.invoice_data.invoice_date }}",
+            "due_date": "={{ $json.invoice_data.due_date }}",
+            "status": "sent",
+            "sent_at": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-invoice",
+      "name": "Log Invoice to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1500, 150],
+      "notes": "⚠️ Lưu hóa đơn vào Google Sheets tracking. Cần Sheet ID."
+    },
+    {
+      "parameters": {
+        "channel": "#finance",
+        "text": "📄 *Hóa đơn mới đã gửi!*\n\n*Mã hóa đơn:* #{{ $json.invoice_data.invoice_number }}\n*Khách hàng:* {{ $json.invoice_data.client_name }}\n*Tổng tiền:* {{ $json.invoice_data.total.toLocaleString('vi-VN') }}đ\n*Hạn thanh toán:* {{ $json.invoice_data.due_date }}",
+        "otherOptions": {}
+      },
+      "id": "notify-finance",
+      "name": "Notify Finance Team (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1500, 450],
+      "notes": "⚠️ Thông báo cho phòng kế toán qua Slack. Cần Slack OAuth."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Monthly)": {
+      "main": [
+        [
+          {
+            "node": "Get Billable Items (Google Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Billable Items (Google Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Group by Client & Calculate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Group by Client & Calculate": {
+      "main": [
+        [
+          {
+            "node": "Format Invoice Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Invoice Email": {
+      "main": [
+        [
+          {
+            "node": "Send Invoice Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Invoice Email": {
+      "main": [
+        [
+          {
+            "node": "Log Invoice to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Invoice to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Notify Finance Team (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["enterprise", "invoice", "billing", "finance", "accounting"],
+  "triggerCount": 1,
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-workflow"
+  }
+}

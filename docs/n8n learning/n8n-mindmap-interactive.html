@@ -1,0 +1,1315 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>N8N Mindmap - Từ Cơ Bản Đến Chuyên Sâu | Cong Dinh</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --bg-soft: #1a2230;
+    --card: #1e2738;
+    --border: #2a3447;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #ea4b71; /* n8n pink */
+    --accent-2: #4b9eea;
+    --biz: #f59e0b;     /* Business track */
+    --tech: #06b6d4;    /* Technical track */
+    --mixed: #a855f7;   /* Mixed */
+    --level-1: #ea4b71;
+    --level-2: #f59e0b;
+    --level-3: #10b981;
+    --level-4: #06b6d4;
+    --level-5: #a855f7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    overflow-x: hidden;
+  }
+  header {
+    background: linear-gradient(135deg, #ea4b71 0%, #b8336a 50%, #4b9eea 100%);
+    padding: 32px 40px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    position: sticky; top: 0; z-index: 100;
+  }
+  header h1 {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 4px;
+  }
+  header p { color: rgba(255,255,255,0.85); font-size: 14px; }
+  .toolbar {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .toolbar button, .toolbar input {
+    background: rgba(255,255,255,0.15);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.25);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+    backdrop-filter: blur(8px);
+  }
+  .toolbar button:hover { background: rgba(255,255,255,0.25); transform: translateY(-1px); }
+  .toolbar input {
+    background: rgba(255,255,255,0.95);
+    color: #111;
+    min-width: 280px;
+    cursor: text;
+    font-weight: 500;
+  }
+  .legend {
+    display: flex; gap: 14px; flex-wrap: wrap;
+    margin-top: 14px; font-size: 12px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; color: rgba(255,255,255,0.95); }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot.biz { background: var(--biz); }
+  .dot.tech { background: var(--tech); }
+  .dot.mixed { background: var(--mixed); }
+
+  main {
+    padding: 28px 24px 80px;
+    max-width: 1700px;
+    margin: 0 auto;
+  }
+  .root {
+    text-align: center;
+    margin-bottom: 30px;
+    padding: 28px;
+    background: linear-gradient(135deg, rgba(234,75,113,0.15), rgba(75,158,234,0.15));
+    border: 2px solid var(--accent);
+    border-radius: 20px;
+  }
+  .root h2 {
+    font-size: 32px;
+    background: linear-gradient(135deg, #ea4b71, #4b9eea);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 8px;
+  }
+  .root p { color: var(--text-dim); font-size: 15px; max-width: 720px; margin: 0 auto; }
+
+  .branches {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 20px;
+  }
+  .branch {
+    background: var(--card);
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    transition: all 0.25s;
+  }
+  .branch:hover {
+    border-color: var(--accent);
+    box-shadow: 0 8px 24px rgba(234,75,113,0.15);
+    transform: translateY(-2px);
+  }
+  .branch-header {
+    padding: 16px 18px;
+    background: linear-gradient(90deg, rgba(234,75,113,0.18), transparent);
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .branch-header .icon {
+    font-size: 24px;
+    width: 40px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(234,75,113,0.18);
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .branch-header .title {
+    flex: 1;
+    font-weight: 700;
+    font-size: 17px;
+  }
+  .branch-header .badge {
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .badge.biz { background: rgba(245,158,11,0.2); color: var(--biz); border: 1px solid var(--biz); }
+  .badge.tech { background: rgba(6,182,212,0.2); color: var(--tech); border: 1px solid var(--tech); }
+  .badge.mixed { background: rgba(168,85,247,0.2); color: var(--mixed); border: 1px solid var(--mixed); }
+  .chevron {
+    transition: transform 0.3s;
+    color: var(--text-dim);
+  }
+  .branch.collapsed .chevron { transform: rotate(-90deg); }
+  .branch-body {
+    padding: 14px 18px 18px;
+    max-height: 5000px;
+    overflow: hidden;
+    transition: max-height 0.4s ease, padding 0.3s;
+  }
+  .branch.collapsed .branch-body {
+    max-height: 0;
+    padding: 0 18px;
+  }
+  .subnode {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--bg-soft);
+    border-left: 3px solid var(--level-2);
+    border-radius: 6px;
+    font-size: 13.5px;
+  }
+  .subnode .sub-title {
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+    font-size: 14px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .subnode .sub-level {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--border);
+    color: var(--text-dim);
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .sub-level.l1 { background: var(--level-3); color: white; }
+  .sub-level.l2 { background: var(--level-4); color: white; }
+  .sub-level.l3 { background: var(--level-5); color: white; }
+  .subnode ul {
+    list-style: none;
+    padding: 0;
+    margin-top: 6px;
+  }
+  .subnode ul li {
+    padding: 3px 0 3px 16px;
+    position: relative;
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .subnode ul li::before {
+    content: "▸";
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-size: 10px;
+    top: 5px;
+  }
+  .subnode ul li strong { color: var(--text); font-weight: 600; }
+  .subnode ul li code {
+    background: rgba(234,75,113,0.15);
+    color: #ffb3c6;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', 'Monaco', monospace;
+  }
+  .tip {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(16,185,129,0.1);
+    border-left: 3px solid var(--level-3);
+    border-radius: 4px;
+    font-size: 12.5px;
+    color: #a5e2c5;
+  }
+  .tip strong { color: var(--level-3); }
+  .warn {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(245,158,11,0.1);
+    border-left: 3px solid var(--biz);
+    border-radius: 4px;
+    font-size: 12.5px;
+    color: #f5d490;
+  }
+  .case {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: rgba(75,158,234,0.08);
+    border-left: 3px solid var(--accent-2);
+    border-radius: 4px;
+    font-size: 12.5px;
+  }
+  .case strong { color: var(--accent-2); }
+  .metric { color: var(--level-3); font-weight: 700; }
+
+  /* Branch color themes */
+  .branch[data-theme="foundation"] .branch-header { background: linear-gradient(90deg, rgba(168,85,247,0.18), transparent); }
+  .branch[data-theme="foundation"] .branch-header .icon { background: rgba(168,85,247,0.2); }
+  .branch[data-theme="foundation"] .subnode { border-left-color: #a855f7; }
+
+  .branch[data-theme="core"] .branch-header { background: linear-gradient(90deg, rgba(75,158,234,0.18), transparent); }
+  .branch[data-theme="core"] .branch-header .icon { background: rgba(75,158,234,0.2); }
+  .branch[data-theme="core"] .subnode { border-left-color: #4b9eea; }
+
+  .branch[data-theme="advanced"] .branch-header { background: linear-gradient(90deg, rgba(234,75,113,0.18), transparent); }
+  .branch[data-theme="advanced"] .branch-header .icon { background: rgba(234,75,113,0.2); }
+  .branch[data-theme="advanced"] .subnode { border-left-color: #ea4b71; }
+
+  .branch[data-theme="ai"] .branch-header { background: linear-gradient(90deg, rgba(16,185,129,0.18), transparent); }
+  .branch[data-theme="ai"] .branch-header .icon { background: rgba(16,185,129,0.2); }
+  .branch[data-theme="ai"] .subnode { border-left-color: #10b981; }
+
+  .branch[data-theme="prod"] .branch-header { background: linear-gradient(90deg, rgba(6,182,212,0.18), transparent); }
+  .branch[data-theme="prod"] .branch-header .icon { background: rgba(6,182,212,0.2); }
+  .branch[data-theme="prod"] .subnode { border-left-color: #06b6d4; }
+
+  .branch[data-theme="enterprise"] .branch-header { background: linear-gradient(90deg, rgba(245,158,11,0.18), transparent); }
+  .branch[data-theme="enterprise"] .branch-header .icon { background: rgba(245,158,11,0.2); }
+  .branch[data-theme="enterprise"] .subnode { border-left-color: #f59e0b; }
+
+  .branch[data-theme="personal"] .branch-header { background: linear-gradient(90deg, rgba(236,72,153,0.18), transparent); }
+  .branch[data-theme="personal"] .branch-header .icon { background: rgba(236,72,153,0.2); }
+  .branch[data-theme="personal"] .subnode { border-left-color: #ec4899; }
+
+  .branch[data-theme="bp"] .branch-header { background: linear-gradient(90deg, rgba(132,204,22,0.18), transparent); }
+  .branch[data-theme="bp"] .branch-header .icon { background: rgba(132,204,22,0.2); }
+  .branch[data-theme="bp"] .subnode { border-left-color: #84cc16; }
+
+  .branch[data-theme="case"] .branch-header { background: linear-gradient(90deg, rgba(99,102,241,0.18), transparent); }
+  .branch[data-theme="case"] .branch-header .icon { background: rgba(99,102,241,0.2); }
+  .branch[data-theme="case"] .subnode { border-left-color: #6366f1; }
+
+  .branch[data-theme="trouble"] .branch-header { background: linear-gradient(90deg, rgba(239,68,68,0.18), transparent); }
+  .branch[data-theme="trouble"] .branch-header .icon { background: rgba(239,68,68,0.2); }
+  .branch[data-theme="trouble"] .subnode { border-left-color: #ef4444; }
+
+  .branch[data-theme="eco"] .branch-header { background: linear-gradient(90deg, rgba(20,184,166,0.18), transparent); }
+  .branch[data-theme="eco"] .branch-header .icon { background: rgba(20,184,166,0.2); }
+  .branch[data-theme="eco"] .subnode { border-left-color: #14b8a6; }
+
+  .footer {
+    margin-top: 60px;
+    padding: 24px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 13px;
+    border-top: 1px solid var(--border);
+  }
+  .footer a { color: var(--accent-2); text-decoration: none; }
+  .footer a:hover { text-decoration: underline; }
+  .hidden { display: none !important; }
+  .highlight { background: rgba(234,75,113,0.4) !important; color: white; padding: 1px 3px; border-radius: 3px; }
+
+  @media (max-width: 768px) {
+    header { padding: 20px; }
+    header h1 { font-size: 22px; }
+    main { padding: 16px; }
+    .branches { grid-template-columns: 1fr; }
+    .toolbar input { min-width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🧠 N8N Mindmap — Từ Cơ Bản Đến Chuyên Sâu</h1>
+  <p>Khung kiến thức n8n toàn diện 2025-2026 · Mixed track cho Business + Technical · Tổng hợp từ docs nội bộ + research</p>
+  <div class="toolbar">
+    <input type="text" id="search" placeholder="🔍 Tìm trong mindmap (vd: queue mode, AI agent, webhook...)">
+    <button onclick="expandAll()">▼ Mở tất cả</button>
+    <button onclick="collapseAll()">▲ Thu gọn</button>
+    <button onclick="filterTrack('all')">Tất cả</button>
+    <button onclick="filterTrack('biz')">🏢 Business</button>
+    <button onclick="filterTrack('tech')">⚙️ Technical</button>
+    <button onclick="window.print()">🖨️ In</button>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><span class="dot biz"></span>Business Track — Use case, automation, ROI</div>
+    <div class="legend-item"><span class="dot tech"></span>Technical Track — Architecture, code, scale</div>
+    <div class="legend-item"><span class="dot mixed"></span>Mixed — Cho cả 2 đối tượng</div>
+  </div>
+</header>
+
+<main>
+
+<div class="root">
+  <h2>n8n — Fair-code Workflow Automation Platform</h2>
+  <p>Self-hostable · Visual editor · 500+ integrations · Native AI/LangChain · JavaScript + Python · 186k+ ⭐ GitHub · v2.0 (Jan 2026)</p>
+</div>
+
+<div class="branches" id="branches">
+
+<!-- 1. FOUNDATIONS -->
+<div class="branch" data-theme="foundation" data-track="mixed">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">📖</div>
+    <div class="title">1. Foundations — Nền tảng</div>
+    <span class="badge mixed">Mixed</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">1.1 n8n là gì? <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Định nghĩa:</strong> Nền tảng workflow automation mã nguồn mở (fair-code), kết nối API-enabled apps</li>
+        <li><strong>Tên gọi:</strong> "nodemation" — đọc là <code>n-eight-n</code></li>
+        <li><strong>Triết lý:</strong> Visual + Code = Best of both worlds</li>
+        <li><strong>Vị thế 2026:</strong> <span class="metric">186k+ ⭐ GitHub</span>, top workflow automation OSS</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">1.2 Fair-code License <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Sustainable Use License:</strong> Free cho cá nhân và doanh nghiệp nhỏ</li>
+        <li>✅ Free: self-host nội bộ, revenue &lt;$1M USD/năm</li>
+        <li>💰 Commercial license: enterprise lớn, SaaS resell, white-label</li>
+      </ul>
+      <div class="warn"><strong>⚠️ Lưu ý:</strong> Khác với MIT/Apache — đọc kỹ điều khoản trước khi commercialize</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">1.3 So sánh với Zapier / Make / Power Automate <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>n8n:</strong> Self-host, free, 500+ nodes, JS/Python, AI native</li>
+        <li><strong>Zapier:</strong> Cloud only, 6000+ apps, dễ dùng nhất, đắt khi scale</li>
+        <li><strong>Make:</strong> Cloud only, visual đẹp, complex routing, pay-per-operation</li>
+        <li><strong>Power Automate:</strong> Microsoft ecosystem, enterprise integration tốt</li>
+      </ul>
+      <div class="tip"><strong>💡 Khi nào chọn n8n:</strong> Data privacy quan trọng, cần custom code, muốn full control, budget hạn chế</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">1.4 Kiến trúc tổng quan <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Editor (UI):</strong> Vue.js frontend, drag-drop canvas</li>
+        <li><strong>Workflow Engine:</strong> Node.js orchestrator, thực thi nodes</li>
+        <li><strong>Database:</strong> SQLite (dev) / PostgreSQL (production)</li>
+        <li><strong>Task Runners:</strong> Isolated process cho code execution (JS/Python)</li>
+        <li><strong>Queue (optional):</strong> Redis cho production scale</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">1.5 Use Cases tổng quan <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>🏢 Business:</strong> CRM sync, marketing, HR, finance, support, ETL</li>
+        <li><strong>👤 Cá nhân:</strong> Email auto, social media, productivity, smart home</li>
+        <li><strong>🤖 AI:</strong> Chatbot, RAG, multi-agent, document processing</li>
+        <li><strong>📊 Data:</strong> ETL pipelines, reporting, monitoring, alerting</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 2. INSTALLATION -->
+<div class="branch" data-theme="foundation" data-track="tech">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">🛠️</div>
+    <div class="title">2. Installation & Setup</div>
+    <span class="badge tech">Tech</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">2.1 n8n Cloud <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li>Managed SaaS — không cần setup, trial 14 ngày</li>
+        <li>Pricing: per active workflow + execution</li>
+        <li>Phù hợp: cá nhân, team nhỏ, POC nhanh</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">2.2 Docker Compose <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Khuyến nghị:</strong> Cách deploy phổ biến nhất cho self-hosted</li>
+        <li>Services: <code>n8n</code> + <code>postgres</code> + <code>redis</code> + <code>nginx/traefik</code></li>
+        <li>Volume mounts cho <code>~/.n8n</code> và database</li>
+        <li>Environment vars: <code>N8N_ENCRYPTION_KEY</code>, <code>N8N_HOST</code>, <code>WEBHOOK_URL</code></li>
+      </ul>
+      <div class="tip"><strong>💡 Best practice:</strong> Tạo <code>N8N_ENCRYPTION_KEY</code> 32 ký tự ngay từ đầu — không bao giờ đổi sau khi đã có credentials</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">2.3 npm install <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><code>npm install n8n -g</code> rồi chạy <code>n8n start</code></li>
+        <li>Phù hợp: development, học tập, thử nhanh</li>
+        <li>Không khuyến nghị cho production</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">2.4 Kubernetes (K8s) <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li>Helm chart chính thức: <code>community-charts/n8n</code></li>
+        <li>Deployment: main + workers + webhook processors</li>
+        <li>HPA (Horizontal Pod Autoscaler) theo CPU/Redis queue depth</li>
+        <li>StatefulSet cho PostgreSQL, Redis</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">2.5 Cloud providers <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>AWS:</strong> ECS Fargate / EKS, RDS PostgreSQL, ElastiCache Redis</li>
+        <li><strong>Azure:</strong> Container Apps / AKS, Azure Database, Azure Cache</li>
+        <li><strong>GCP:</strong> Cloud Run / GKE, Cloud SQL, Memorystore</li>
+        <li><strong>VPS:</strong> Hetzner, Contabo, DigitalOcean — cost-effective</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 3. CORE CONCEPTS -->
+<div class="branch" data-theme="core" data-track="mixed">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">🔑</div>
+    <div class="title">3. Core Concepts — Khái niệm cốt lõi</div>
+    <span class="badge mixed">Mixed</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">3.1 Workflows <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Định nghĩa:</strong> Chuỗi nodes kết nối thành automation pipeline</li>
+        <li><strong>Lifecycle:</strong> Draft → Active → Deactivated → Archived</li>
+        <li><strong>Structure:</strong> JSON với <code>nodes[]</code>, <code>connections{}</code>, <code>settings{}</code></li>
+        <li><strong>Tags & Folders:</strong> Tổ chức workflow theo dự án/team</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">3.2 Nodes — 3 loại chính <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Trigger nodes:</strong> Khởi động workflow — Schedule, Webhook, App events</li>
+        <li><strong>Action nodes:</strong> Thực hiện task — HTTP, Database, Send Email, API calls</li>
+        <li><strong>Logic nodes:</strong> Control flow — IF, Switch, Merge, Loop, Wait</li>
+      </ul>
+      <div class="tip"><strong>💡 Tip:</strong> 500+ built-in nodes 2026 — luôn check trước khi viết custom code</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">3.3 Connections <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Main connection:</strong> Data flow chính giữa nodes</li>
+        <li><strong>Error connection:</strong> Branch riêng cho lỗi (output thứ 2)</li>
+        <li><strong>AI connections:</strong> Tool, Memory, Model (cho LangChain nodes)</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">3.4 Data Structure <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Items array:</strong> Mỗi node nhận/trả về array of items</li>
+        <li><strong>Item shape:</strong> <code>{ json: {...}, binary: {...}, pairedItem: {...} }</code></li>
+        <li><strong>JSON:</strong> Data chính, dễ access qua expressions</li>
+        <li><strong>Binary:</strong> Files, images — handle riêng để tối ưu memory</li>
+        <li><strong>pairedItem:</strong> Trace data lineage qua các nodes</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">3.5 Credentials <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Types:</strong> API Key, OAuth2, Basic Auth, Custom credentials</li>
+        <li><strong>Encryption:</strong> AES-256 với <code>N8N_ENCRYPTION_KEY</code></li>
+        <li><strong>Sharing:</strong> Per-user / shared / project-scoped (Enterprise)</li>
+        <li><strong>External secrets:</strong> Vault, AWS Secrets Manager (Enterprise)</li>
+      </ul>
+      <div class="warn"><strong>⚠️ Security:</strong> Không bao giờ commit <code>.env</code> có <code>N8N_ENCRYPTION_KEY</code> vào Git</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">3.6 Triggers — Cơ chế khởi động <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Schedule:</strong> Cron expression — định kỳ chạy</li>
+        <li><strong>Webhook:</strong> HTTP endpoint — push từ ngoài vào</li>
+        <li><strong>App Trigger (Push):</strong> Realtime — Gmail, Slack, Stripe events</li>
+        <li><strong>App Trigger (Poll):</strong> n8n polling app theo interval</li>
+        <li><strong>Manual:</strong> Click "Execute" — chỉ dùng testing</li>
+        <li><strong>Form Trigger:</strong> n8n form built-in (no-code form)</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">3.7 Executions <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Modes:</strong> Manual / Trigger / Webhook / Retry</li>
+        <li><strong>Status:</strong> Success / Error / Running / Canceled / Waiting</li>
+        <li><strong>Retention:</strong> Cấu hình bao lâu giữ execution data</li>
+        <li><strong>Save settings:</strong> "Save successful" / "Save errors only"</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 4. EXPRESSIONS & CODE -->
+<div class="branch" data-theme="advanced" data-track="tech">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">⚡</div>
+    <div class="title">4. Expressions & Code Node</div>
+    <span class="badge tech">Tech</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">4.1 Expression Syntax <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Cú pháp:</strong> <code>{{ expression }}</code> — JavaScript template literals</li>
+        <li><strong>Current item:</strong> <code>{{ $json.field }}</code></li>
+        <li><strong>First/all items:</strong> <code>{{ $input.first().json.x }}</code>, <code>{{ $input.all() }}</code></li>
+        <li><strong>Other nodes:</strong> <code>{{ $('Node Name').item.json.x }}</code></li>
+        <li><strong>Variables:</strong> <code>$now</code>, <code>$today</code>, <code>$workflow</code>, <code>$execution</code>, <code>$env</code></li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">4.2 Built-in Helpers <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Date/Time:</strong> Luxon <code>DateTime</code> — <code>$now.plus({days: 7})</code></li>
+        <li><strong>String:</strong> <code>.toUpperCase()</code>, <code>.replaceAll()</code>, <code>.split()</code></li>
+        <li><strong>Array:</strong> <code>.map()</code>, <code>.filter()</code>, <code>.reduce()</code>, <code>.sort()</code></li>
+        <li><strong>JMESPath:</strong> <code>$jmespath($json, "items[?status=='active']")</code></li>
+        <li><strong>Crypto:</strong> <code>$crypto.hash()</code>, <code>$crypto.uuid()</code></li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">4.3 Code Node — JavaScript <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>2 modes:</strong> "Run Once for All Items" / "Run Once for Each Item"</li>
+        <li><strong>Return:</strong> Array of <code>{ json: {...} }</code> objects</li>
+        <li><strong>Built-in libs:</strong> crypto, axios, moment, lodash (limited sandbox)</li>
+        <li><strong>External modules:</strong> Cần config <code>NODE_FUNCTION_ALLOW_EXTERNAL</code></li>
+      </ul>
+      <div class="tip"><strong>💡 Pattern:</strong> Dùng Code node khi expression quá phức tạp — dễ test & maintain hơn</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">4.4 Code Node — Python <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li>Pyodide runtime — chạy Python trong browser/Node sandbox</li>
+        <li><strong>Hạn chế:</strong> Slower than JS, không phải tất cả lib có sẵn</li>
+        <li><strong>Phù hợp:</strong> Data science, scientific computing, sẵn code Python</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">4.5 HTTP Request node (deep dive) <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Auth:</strong> None, Basic, Header, OAuth2, Bearer, Custom</li>
+        <li><strong>Pagination:</strong> Built-in handlers — offset, page, link header, next URL</li>
+        <li><strong>Retry:</strong> Configurable retries với exponential backoff</li>
+        <li><strong>Streaming:</strong> Hỗ trợ binary data, SSE</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 5. WORKFLOW PATTERNS & ERROR HANDLING -->
+<div class="branch" data-theme="advanced" data-track="tech">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">🧩</div>
+    <div class="title">5. Workflow Patterns & Error Handling</div>
+    <span class="badge tech">Tech</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">5.1 Workflow Design Patterns <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Sequential:</strong> A → B → C tuần tự</li>
+        <li><strong>Conditional (IF/Switch):</strong> Branch theo điều kiện</li>
+        <li><strong>Parallel/Fan-out:</strong> Split → multi-branch chạy song song</li>
+        <li><strong>Fan-in/Merge:</strong> Hợp nhất kết quả từ nhiều nhánh</li>
+        <li><strong>Loop Over Items:</strong> Xử lý batch theo size</li>
+        <li><strong>Wait & Delay:</strong> Async pause, resume sau N giây/event</li>
+        <li><strong>Circuit Breaker:</strong> Tự ngắt khi service downstream lỗi liên tục</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">5.2 Sub-workflows (Reusability) <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Execute Workflow node:</strong> Gọi workflow khác như function</li>
+        <li><strong>Input/Output mapping:</strong> Pass data qua tham số</li>
+        <li><strong>Use case:</strong> Shared logic, microservice pattern, version control</li>
+      </ul>
+      <div class="tip"><strong>💡 Best practice:</strong> Tách logic dùng chung (auth, logging, notification) thành sub-workflow để DRY</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">5.3 Error Handling Strategies <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Error Trigger:</strong> Workflow riêng catch lỗi từ workflow khác</li>
+        <li><strong>Continue On Fail:</strong> Setting trên node — không break flow</li>
+        <li><strong>Try/Catch pattern:</strong> Dùng IF check output error</li>
+        <li><strong>Stop and Error node:</strong> Throw custom error</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">5.4 Retry Logic <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Node-level retry:</strong> Retry On Fail — set max attempts, wait time</li>
+        <li><strong>Exponential backoff:</strong> Wait 2^n giây mỗi lần retry</li>
+        <li><strong>Idempotency:</strong> Đảm bảo retry không gây side effect kép</li>
+        <li><strong>Dead letter queue:</strong> Lưu request fail vào queue riêng để xử lý sau</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">5.5 Debugging Techniques <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Pin data:</strong> Lock output để dev nhanh, không gọi API lại</li>
+        <li><strong>Execute previous nodes:</strong> Re-run từ node bất kỳ</li>
+        <li><strong>Step-by-step execution:</strong> Test từng node độc lập</li>
+        <li><strong>Console.log trong Code node:</strong> Xem output ở execution log</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 6. AI & LANGCHAIN -->
+<div class="branch" data-theme="ai" data-track="mixed">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">🤖</div>
+    <div class="title">6. AI & LangChain (HOT 2026)</div>
+    <span class="badge mixed">Mixed</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">6.1 n8n 2.0 — Native LangChain <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Release:</strong> Jan 2026 — AI-first orchestration layer</li>
+        <li><strong>70+ AI nodes:</strong> Native, deep integration với LangChain</li>
+        <li><strong>~75% customers</strong> đang dùng AI features</li>
+        <li><strong>Triết lý:</strong> Combine deterministic automation + AI reasoning</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">6.2 LLM Providers <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>OpenAI:</strong> GPT-4, GPT-4o, o1, embeddings, vision</li>
+        <li><strong>Anthropic:</strong> Claude Opus/Sonnet/Haiku — strong reasoning</li>
+        <li><strong>Google:</strong> Gemini Pro/Flash, Vertex AI</li>
+        <li><strong>Open source:</strong> Ollama, Hugging Face, LM Studio (self-host)</li>
+        <li><strong>Specialized:</strong> Mistral, Groq (fast inference), Together AI</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">6.3 AI Agent Architecture <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Agent node:</strong> ReAct, Tools agent, OpenAI Functions, Conversational</li>
+        <li><strong>Tools:</strong> HTTP Request, Code, sub-workflows làm tool cho agent</li>
+        <li><strong>Memory:</strong> Buffer, Window, Summary, Vector store memory</li>
+        <li><strong>Output parser:</strong> Auto-fix, Structured output (JSON Schema)</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">6.4 RAG Pipeline <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Vector stores:</strong> Pinecone, Qdrant, Supabase, Postgres pgvector</li>
+        <li><strong>Embeddings:</strong> OpenAI <code>text-embedding-3</code>, Cohere, local</li>
+        <li><strong>Document loaders:</strong> PDF, web, GDrive, Notion</li>
+        <li><strong>Splitters:</strong> Recursive, Character, Token-based</li>
+        <li><strong>Retrieval:</strong> Similarity, MMR, hybrid search</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">6.5 Multi-Agent Orchestration <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Pattern:</strong> Supervisor agent điều phối worker agents</li>
+        <li><strong>Specialized agents:</strong> Research agent, Writer agent, Critic agent</li>
+        <li><strong>Coordination:</strong> Via shared memory hoặc message passing</li>
+        <li><strong>Use case:</strong> Complex tasks vượt quá khả năng single agent</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">6.6 AI Use Cases thực tế <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Customer support:</strong> Chatbot RAG trên KB, escalate to human</li>
+        <li><strong>Document processing:</strong> Extract invoice, parse contract, OCR</li>
+        <li><strong>Content generation:</strong> Social posts, email drafts, SEO content</li>
+        <li><strong>Lead qualification:</strong> Score lead, suggest next action</li>
+        <li><strong>Data enrichment:</strong> Tự động fill thông tin từ web/LinkedIn</li>
+        <li><strong>Voice agents:</strong> n8n + Vapi/ElevenLabs/Twilio</li>
+      </ul>
+      <div class="case"><strong>📊 Case:</strong> Voice AI agent cho receptionist nhà hàng — đặt bàn 24/7, tích hợp Google Calendar + Twilio</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">6.7 AI Evaluation & Reliability <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Eval nodes:</strong> Built-in evaluation cho output quality</li>
+        <li><strong>LLM-as-judge:</strong> Dùng LLM khác chấm điểm output</li>
+        <li><strong>Guardrails:</strong> Validate JSON schema, filter content</li>
+        <li><strong>Roadmap 2026:</strong> Sâu hơn về evaluation tooling</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 7. PRODUCTION & SCALE -->
+<div class="branch" data-theme="prod" data-track="tech">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">🚀</div>
+    <div class="title">7. Production & Scaling</div>
+    <span class="badge tech">Tech</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">7.1 Queue Mode — Khi nào? <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>&lt;1,000 exec/ngày:</strong> Standard mode + PostgreSQL — đủ dùng</li>
+        <li><strong>1,000–10,000:</strong> Queue mode + 1 worker</li>
+        <li><strong>&gt;10,000:</strong> Queue mode + multi workers + webhook processors</li>
+        <li><strong>Trigger:</strong> Webhook latency &gt;1s hoặc &gt;10-20 concurrent execs</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">7.2 Queue Mode Architecture <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Main process:</strong> UI, push jobs vào Redis queue</li>
+        <li><strong>Workers:</strong> Pull jobs từ Redis, execute, update status</li>
+        <li><strong>Webhook processors:</strong> Tách riêng cho high-volume webhooks</li>
+        <li><strong>Redis:</strong> Message broker bắt buộc</li>
+        <li><strong>PostgreSQL:</strong> Required — SQLite không support queue mode</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">7.3 Critical Configuration <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><code>EXECUTIONS_MODE=queue</code> — bật queue mode (main + workers)</li>
+        <li><code>N8N_ENCRYPTION_KEY</code> — <strong>phải giống nhau</strong> trên main + tất cả workers</li>
+        <li><code>QUEUE_BULL_REDIS_HOST/PORT/PASSWORD</code> — connection Redis</li>
+        <li><code>N8N_CONCURRENCY_PRODUCTION_LIMIT</code> — số job parallel/worker</li>
+      </ul>
+      <div class="warn"><strong>⚠️ Pitfall:</strong> Encryption key khác nhau giữa workers → workflow chạy nhưng API call fail vì không decrypt được credentials</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">7.4 Resource Planning <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Worker memory:</strong> 200-500MB/worker (cao hơn nếu data transform nặng)</li>
+        <li><strong>Node.js heap:</strong> <code>NODE_OPTIONS=--max-old-space-size=4096</code></li>
+        <li><strong>Binary data:</strong> Mode <code>filesystem</code> hoặc S3 cho file lớn</li>
+        <li><strong>DB sizing:</strong> Plan cho execution data retention</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">7.5 Monitoring & Observability <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Prometheus metrics:</strong> <code>N8N_METRICS=true</code> — endpoint <code>/metrics</code></li>
+        <li><strong>Key metrics:</strong> Queue length, worker concurrency, exec duration, error rate</li>
+        <li><strong>Health checks:</strong> <code>/healthz</code>, <code>/healthz/readiness</code></li>
+        <li><strong>Logging:</strong> Centralize (Loki, ELK) với workflow_id, execution_id</li>
+        <li><strong>Alerting:</strong> Grafana + alert rules cho queue backlog, failed execs</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">7.6 Backup & DR <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Database:</strong> <code>pg_dump</code> daily + WAL archive</li>
+        <li><strong>Workflow export:</strong> CLI <code>n8n export:workflow</code> → Git</li>
+        <li><strong>Credentials:</strong> Backed up encrypted in DB — cần ENCRYPTION_KEY để restore</li>
+        <li><strong>Binary data:</strong> S3 versioning hoặc snapshot filesystem</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">7.7 Kubernetes Deployment <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>HPA:</strong> Auto-scale workers theo Redis queue depth</li>
+        <li><strong>Pod separation:</strong> main / worker / webhook deployments riêng</li>
+        <li><strong>Storage:</strong> PVC cho binary data, RDS/Cloud SQL cho DB</li>
+        <li><strong>Network policy:</strong> Restrict ingress/egress, isolate workers</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 8. ENTERPRISE USE CASES -->
+<div class="branch" data-theme="enterprise" data-track="biz">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">🏢</div>
+    <div class="title">8. Enterprise Use Cases</div>
+    <span class="badge biz">Business</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">8.1 CRM & Sales Automation <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Lead capture:</strong> Form → Score → Route to sales rep</li>
+        <li><strong>Pipeline sync:</strong> HubSpot ⇄ Salesforce ⇄ Pipedrive bi-directional</li>
+        <li><strong>Quote/Proposal:</strong> Auto-generate từ template + send DocuSign</li>
+        <li><strong>Follow-up:</strong> Sequence email theo stage, idle deal alert</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">8.2 Marketing Automation <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Email campaigns:</strong> Drip campaigns, segmentation, A/B test</li>
+        <li><strong>Social media:</strong> Cross-post FB/IG/TikTok/LinkedIn từ 1 nguồn</li>
+        <li><strong>Lead nurturing:</strong> Score-based content delivery</li>
+        <li><strong>Analytics:</strong> Combine GA4 + ad platforms → unified dashboard</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">8.3 HR & Employee Management <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Onboarding:</strong> Tạo account (Google Workspace, Slack, GitHub), gửi welcome</li>
+        <li><strong>Offboarding:</strong> Revoke access, archive data, exit interview</li>
+        <li><strong>Leave management:</strong> Form → Approval workflow → Calendar update</li>
+        <li><strong>Performance:</strong> Tổng hợp 360 feedback, gửi reminder review cycle</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">8.4 Finance & Invoicing <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Invoice generation:</strong> Stripe/Shopify order → PDF invoice → Email</li>
+        <li><strong>Payment tracking:</strong> Reconcile bank + accounting (QuickBooks, Xero)</li>
+        <li><strong>Expense approval:</strong> Receipt OCR → manager approve → reimburse</li>
+        <li><strong>Reporting:</strong> Daily revenue dashboard, churn alerts</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">8.5 Customer Support <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Ticket routing:</strong> Categorize bằng AI → assign correct team</li>
+        <li><strong>SLA monitoring:</strong> Alert khi ticket gần breach</li>
+        <li><strong>AI first response:</strong> RAG bot trả lời FAQ, escalate complex</li>
+        <li><strong>CSAT survey:</strong> Auto-send sau ticket close, aggregate insight</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">8.6 Data Integration / ETL <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Source → Staging → Warehouse:</strong> Pattern ELT thay vì ETL</li>
+        <li><strong>Schedule batch:</strong> Daily/hourly sync to BigQuery, Snowflake, Postgres</li>
+        <li><strong>CDC (Change Data Capture):</strong> Webhook-based incremental sync</li>
+        <li><strong>Data validation:</strong> Schema check, anomaly detection</li>
+      </ul>
+      <div class="case"><strong>📊 Case:</strong> StepStone — n8n cho data ingestion, <span class="metric">25× faster</span> integration</div>
+    </div>
+  </div>
+</div>
+
+<!-- 9. PERSONAL USE CASES -->
+<div class="branch" data-theme="personal" data-track="biz">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">👤</div>
+    <div class="title">9. Personal Productivity Use Cases</div>
+    <span class="badge biz">Business</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">9.1 Email & Inbox Zero <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Auto-classify:</strong> AI label email (newsletter, important, spam-ish)</li>
+        <li><strong>Auto-reply:</strong> Out-of-office hoặc tùy context</li>
+        <li><strong>Digest:</strong> Daily summary unread email bằng AI</li>
+        <li><strong>Action extraction:</strong> Pull todo từ email → Notion/Todoist</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">9.2 Social Media Personal Brand <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Content pipeline:</strong> Idea (Notion) → AI draft → review → schedule</li>
+        <li><strong>Cross-posting:</strong> 1 post → adapt cho TikTok/FB/YouTube/X/LinkedIn</li>
+        <li><strong>Analytics:</strong> Pull metrics → weekly dashboard</li>
+        <li><strong>Engagement:</strong> Auto-DM follower mới, comment reply suggestion</li>
+      </ul>
+      <div class="tip"><strong>💡 Cho Cong:</strong> Pattern này phù hợp brand "đào tạo AI/Tech" — pull idea từ docs n8n → AI hook → schedule</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">9.3 Personal Finance <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Expense tracking:</strong> SMS bank → parse → Google Sheets / Notion</li>
+        <li><strong>Budget alert:</strong> Daily spending vs budget, alert khi vượt</li>
+        <li><strong>Investment tracking:</strong> Binance API + chứng khoán → portfolio dashboard</li>
+        <li><strong>Crypto alerts:</strong> Price threshold, on-chain whale movement</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">9.4 Learning & Knowledge <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Content curation:</strong> RSS/YouTube/X → AI summarize → Notion KB</li>
+        <li><strong>Reading list:</strong> "Read later" links → AI TLDR → digest weekly</li>
+        <li><strong>Flashcard:</strong> Auto-generate Anki từ notes</li>
+        <li><strong>Course progress:</strong> Track Udemy/Coursera → log streak</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">9.5 Home Automation / IoT <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Home Assistant integration:</strong> Trigger từ sensor/event</li>
+        <li><strong>Notification:</strong> Doorbell → photo + Telegram</li>
+        <li><strong>Routine:</strong> Morning brief (weather + traffic + calendar) qua loa</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 10. BEST PRACTICES -->
+<div class="branch" data-theme="bp" data-track="mixed">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">✅</div>
+    <div class="title">10. Best Practices</div>
+    <span class="badge mixed">Mixed</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">10.1 Naming & Organization <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Workflow naming:</strong> <code>[Team]-[Purpose]-[Trigger]</code> — vd: <code>Sales-LeadCapture-Webhook</code></li>
+        <li><strong>Node naming:</strong> Action-based — <code>"Fetch active leads"</code> thay vì <code>"HTTP1"</code></li>
+        <li><strong>Tags:</strong> Theo domain (sales, hr, finance) + env (prod, dev)</li>
+        <li><strong>Sticky notes:</strong> Document logic phức tạp ngay trên canvas</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">10.2 Security <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Credentials:</strong> Least privilege — API key chỉ cấp scope cần thiết</li>
+        <li><strong>Encryption key:</strong> 32+ chars, lưu trong secret manager, không commit</li>
+        <li><strong>HTTPS only:</strong> Force SSL, dùng Let's Encrypt / Cloudflare</li>
+        <li><strong>Webhook auth:</strong> Header token / HMAC signature verify</li>
+        <li><strong>RBAC:</strong> User roles, project-scoped credentials (Enterprise)</li>
+        <li><strong>Audit log:</strong> Track ai sửa workflow gì khi nào</li>
+        <li><strong>Rotation:</strong> Rotate credentials định kỳ (90 ngày)</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">10.3 Performance <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Batch processing:</strong> Tránh load 10k items 1 lần — split thành batches 100</li>
+        <li><strong>Binary mode filesystem:</strong> Không giữ file lớn trong RAM</li>
+        <li><strong>Pagination:</strong> Luôn dùng built-in pagination cho HTTP node</li>
+        <li><strong>Cache:</strong> Cache API response không đổi (Redis, static node)</li>
+        <li><strong>Rate limiting:</strong> Respect API limit — Wait node hoặc Code logic</li>
+        <li><strong>Concurrency control:</strong> Giới hạn parallel để không quá tải downstream</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">10.4 Reliability <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Idempotency:</strong> Workflow chạy 2 lần cùng input → kết quả giống nhau</li>
+        <li><strong>Error workflow:</strong> Tách workflow chuyên catch + alert + retry</li>
+        <li><strong>Timeout:</strong> Set timeout cho mọi HTTP call (default vô hạn rất nguy hiểm)</li>
+        <li><strong>Circuit breaker:</strong> Detect downstream lỗi → tạm dừng workflow</li>
+        <li><strong>Monitoring:</strong> Alert qua Slack/Telegram khi workflow fail</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">10.5 Testing & QA <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Test data:</strong> Pin sample data, không gọi production API khi dev</li>
+        <li><strong>Staging env:</strong> Separate n8n instance cho test trước deploy</li>
+        <li><strong>Manual triggers:</strong> Tạo workflow test riêng để verify subflow</li>
+        <li><strong>Schema validation:</strong> Validate input/output bằng JSON Schema</li>
+        <li><strong>Eval suite (AI):</strong> Test prompts với batch input, đánh giá quality</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">10.6 Version Control & CI/CD <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>n8n CLI export:</strong> <code>n8n export:workflow --all</code> → commit JSON vào Git</li>
+        <li><strong>Source Control feature</strong> (Enterprise): Sync workflows với Git native</li>
+        <li><strong>CI pipeline:</strong> Lint workflow JSON, deploy staging → test → prod</li>
+        <li><strong>Workflow versioning:</strong> Tag releases, có rollback path</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">10.7 Documentation <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Sticky notes:</strong> Why? + Edge cases + Owner</li>
+        <li><strong>Workflow description:</strong> Trigger, owner, dependencies, runbook link</li>
+        <li><strong>External docs:</strong> Notion/Confluence link cho business logic phức tạp</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 11. CASE STUDIES -->
+<div class="branch" data-theme="case" data-track="mixed">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">📊</div>
+    <div class="title">11. Case Studies — Real-world ROI</div>
+    <span class="badge mixed">Mixed</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">11.1 Delivery Hero 🍔 <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Industry:</strong> Food delivery, global</li>
+        <li><strong>Result:</strong> <span class="metric">200 giờ/tháng tiết kiệm</span> từ 1 workflow duy nhất</li>
+        <li><strong>Use case:</strong> Internal ops automation, data integration</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">11.2 Vodafone 📡 <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Industry:</strong> Telecom, enterprise</li>
+        <li><strong>Result:</strong> <span class="metric">5,000 person-days/năm</span> với 33 workflows</li>
+        <li><strong>Use case:</strong> Incident management automation</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">11.3 Musixmatch 🎵 <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Industry:</strong> Music tech</li>
+        <li><strong>Result:</strong> <span class="metric">47 ngày engineering</span> tiết kiệm trong 4 tháng</li>
+        <li><strong>Use case:</strong> Engineering time redirect cho core product</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">11.4 StepStone 💼 <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Industry:</strong> Job marketplace</li>
+        <li><strong>Result:</strong> <span class="metric">25× faster</span> data integration</li>
+        <li><strong>Use case:</strong> Data ingestion automation</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">11.5 TechStore.vn (E-commerce VN) 🛒 <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Use case:</strong> Order fulfillment, support automation</li>
+        <li><strong>Workflow:</strong> Shopify order → Stock check → Carrier API → SMS customer → CRM update</li>
+        <li><strong>Tiết kiệm:</strong> 4-5 nhân sự ops, 80% order auto-processed</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">11.6 CloudMetrics.io (SaaS) ☁️ <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Use case:</strong> Customer onboarding, billing, churn prediction</li>
+        <li><strong>Architecture:</strong> Queue mode + 4 workers + Redis cluster</li>
+        <li><strong>Volume:</strong> 50k execution/ngày</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">11.7 ROI chung ngành <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Average ROI:</strong> <span class="metric">240%</span> với automation</li>
+        <li><strong>AI automation:</strong> <span class="metric">$3.7 return/$1</span> đầu tư</li>
+        <li><strong>Enterprise:</strong> Tiết kiệm <span class="metric">$10k-15k/tháng</span> ops cost</li>
+      </ul>
+      <div class="tip"><strong>💡 Sales pitch:</strong> Khi tư vấn doanh nghiệp — luôn quy đổi giờ công, error reduction, faster cash cycle</div>
+    </div>
+  </div>
+</div>
+
+<!-- 12. TROUBLESHOOTING -->
+<div class="branch" data-theme="trouble" data-track="tech">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">🔧</div>
+    <div class="title">12. Troubleshooting</div>
+    <span class="badge tech">Tech</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">12.1 Installation Issues <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Permission denied (Docker):</strong> Set <code>N8N_USER</code> đúng UID/GID</li>
+        <li><strong>Port conflict:</strong> 5678 đang dùng — đổi <code>N8N_PORT</code></li>
+        <li><strong>DB connection refused:</strong> Check network giữa containers</li>
+        <li><strong>SQLite lock:</strong> Lập tức chuyển sang PostgreSQL</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">12.2 Workflow Execution Errors <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>"Cannot read property of undefined":</strong> Item structure khác expected — check <code>$json</code></li>
+        <li><strong>Timeout:</strong> Tăng <code>EXECUTIONS_TIMEOUT</code>, set node-level timeout</li>
+        <li><strong>Out of memory:</strong> Tăng heap, batch processing, binary filesystem mode</li>
+        <li><strong>Rate limit (429):</strong> Wait node + retry với backoff</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">12.3 Webhook Issues <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Webhook không trigger:</strong> Check <code>WEBHOOK_URL</code> + workflow active</li>
+        <li><strong>"Webhook not registered":</strong> Activate workflow + đợi 1-2s</li>
+        <li><strong>HTTPS cert error:</strong> Verify SSL chain với <code>openssl s_client</code></li>
+        <li><strong>Body parsing:</strong> Check Content-Type — JSON vs form-data</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">12.4 Queue Mode Issues <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Jobs stuck in queue:</strong> Check worker logs, Redis connection</li>
+        <li><strong>Credential decryption fail:</strong> ENCRYPTION_KEY mismatch giữa main/worker</li>
+        <li><strong>Webhook chậm:</strong> Add webhook processors riêng</li>
+        <li><strong>Memory leak worker:</strong> Set <code>MAX_PAYLOAD_SIZE</code>, restart định kỳ</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">12.5 Debugging Workflow <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li><strong>Execution logs:</strong> Editor → Executions → click vào execution → xem chi tiết</li>
+        <li><strong>Pin data:</strong> Lock output node để re-run nhanh</li>
+        <li><strong>Console.log:</strong> Dùng trong Code node, xem ở log container</li>
+        <li><strong>Test webhook:</strong> <code>curl -X POST</code> với production URL</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 13. ECOSYSTEM -->
+<div class="branch" data-theme="eco" data-track="mixed">
+  <div class="branch-header" onclick="toggleBranch(this)">
+    <div class="icon">🌐</div>
+    <div class="title">13. Ecosystem & Learning Resources</div>
+    <span class="badge mixed">Mixed</span>
+    <span class="chevron">▼</span>
+  </div>
+  <div class="branch-body">
+    <div class="subnode">
+      <div class="sub-title">13.1 Official Resources <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Docs:</strong> <code>docs.n8n.io</code> — luôn cập nhật nhất</li>
+        <li><strong>Templates:</strong> <code>n8n.io/workflows</code> — 5000+ workflow sẵn dùng</li>
+        <li><strong>Community forum:</strong> <code>community.n8n.io</code> — hỏi đáp, share</li>
+        <li><strong>GitHub:</strong> <code>n8n-io/n8n</code> — source, issue tracker</li>
+        <li><strong>YouTube:</strong> <code>youtube.com/c/n8n-io</code> — official tutorials</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">13.2 Community Nodes <span class="sub-level l2">Intermediate</span></div>
+      <ul>
+        <li>Community-built nodes mở rộng integrations</li>
+        <li>Install qua Settings → Community Nodes (self-hosted only)</li>
+        <li><strong>Phổ biến:</strong> Vector DB nodes, niche APIs, scraping</li>
+      </ul>
+      <div class="warn"><strong>⚠️ Security:</strong> Review code community node trước khi cài production</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">13.3 Building Custom Nodes <span class="sub-level l3">Advanced</span></div>
+      <ul>
+        <li><strong>Tech stack:</strong> TypeScript, n8n-workflow types, REST</li>
+        <li><strong>Structure:</strong> <code>.node.ts</code> + <code>.credentials.ts</code> + <code>icon.svg</code></li>
+        <li><strong>Publish:</strong> npm package với prefix <code>n8n-nodes-</code></li>
+        <li><strong>Test:</strong> Local link → restart n8n → debug</li>
+      </ul>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">13.4 Career & Business Opportunities <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Freelance:</strong> Build automation cho SMB — $50-150/hour</li>
+        <li><strong>Agency:</strong> Automation-as-a-service, $25k+/tháng achievable</li>
+        <li><strong>Training:</strong> Course, workshop, consult enterprise</li>
+        <li><strong>Templates marketplace:</strong> Sell workflow templates</li>
+      </ul>
+      <div class="tip"><strong>💡 Cho Cong:</strong> Brand "đào tạo AI Agent" + n8n có path rõ ràng: course → consult → agency. Demand cao, supply Senior thấp ở VN</div>
+    </div>
+    <div class="subnode">
+      <div class="sub-title">13.5 Learning Path đề xuất <span class="sub-level l1">Beginner</span></div>
+      <ul>
+        <li><strong>Tuần 1-2:</strong> Foundation + first 5 workflows</li>
+        <li><strong>Tuần 3-4:</strong> Expressions, Code node, error handling</li>
+        <li><strong>Tuần 5-6:</strong> AI nodes + LangChain + 1 RAG project</li>
+        <li><strong>Tuần 7-8:</strong> Production deploy (Docker + queue mode)</li>
+        <li><strong>Tuần 9-12:</strong> Real client project / case study riêng</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div class="footer">
+  <p>📌 Mindmap được build từ <strong>21+ docs n8n nội bộ</strong> + research bổ sung từ <a href="https://docs.n8n.io">docs.n8n.io</a>, <a href="https://blog.n8n.io">blog.n8n.io</a>, <a href="https://community.n8n.io">community</a> · Cập nhật May 2026</p>
+  <p style="margin-top: 6px;">Tác giả: <strong>Cong Dinh</strong> · Phục vụ training, consult, brand building · Bản quyền nội dung doc nội bộ thuộc về tác giả</p>
+</div>
+
+</main>
+
+<script>
+function toggleBranch(headerEl) {
+  const branch = headerEl.parentElement;
+  branch.classList.toggle('collapsed');
+}
+function expandAll() {
+  document.querySelectorAll('.branch').forEach(b => b.classList.remove('collapsed'));
+}
+function collapseAll() {
+  document.querySelectorAll('.branch').forEach(b => b.classList.add('collapsed'));
+}
+function filterTrack(track) {
+  const branches = document.querySelectorAll('.branch');
+  branches.forEach(b => {
+    if (track === 'all') {
+      b.classList.remove('hidden');
+    } else {
+      const bTrack = b.dataset.track;
+      // 'mixed' branches show in both
+      if (bTrack === 'mixed' || bTrack === track) {
+        b.classList.remove('hidden');
+      } else {
+        b.classList.add('hidden');
+      }
+    }
+  });
+}
+
+// Search functionality
+const searchInput = document.getElementById('search');
+searchInput.addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  // Clear existing highlights
+  document.querySelectorAll('.highlight').forEach(el => {
+    el.outerHTML = el.innerHTML;
+  });
+  const branches = document.querySelectorAll('.branch');
+  if (!q) {
+    branches.forEach(b => {
+      b.classList.remove('hidden');
+      b.classList.add('collapsed');
+    });
+    return;
+  }
+  branches.forEach(b => {
+    const txt = b.innerText.toLowerCase();
+    if (txt.includes(q)) {
+      b.classList.remove('hidden');
+      b.classList.remove('collapsed');
+      // Highlight matching text
+      highlightInElement(b.querySelector('.branch-body'), q);
+    } else {
+      b.classList.add('hidden');
+    }
+  });
+});
+
+function highlightInElement(root, query) {
+  if (!root) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+  const nodes = [];
+  let n;
+  while ((n = walker.nextNode())) nodes.push(n);
+  nodes.forEach(textNode => {
+    const txt = textNode.nodeValue;
+    const lower = txt.toLowerCase();
+    const idx = lower.indexOf(query);
+    if (idx > -1) {
+      const span = document.createElement('span');
+      const before = document.createTextNode(txt.slice(0, idx));
+      const match = document.createElement('span');
+      match.className = 'highlight';
+      match.textContent = txt.slice(idx, idx + query.length);
+      const after = document.createTextNode(txt.slice(idx + query.length));
+      const parent = textNode.parentNode;
+      parent.insertBefore(before, textNode);
+      parent.insertBefore(match, textNode);
+      parent.insertBefore(after, textNode);
+      parent.removeChild(textNode);
+    }
+  });
+}
+
+// Default: collapse all on load to give overview
+window.addEventListener('DOMContentLoaded', () => {
+  // Start with expanded
+});
+</script>
+
+</body>
+</html>

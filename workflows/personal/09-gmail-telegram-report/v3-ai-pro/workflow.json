@@ -1,0 +1,285 @@
+{
+  "name": "Gmail → Telegram Daily Report (V3 AI Pro)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "triggerAtHour": 7, "triggerAtMinute": 0 }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "⏰ Trigger 7h Sáng",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 100,
+        "filters": { "q": "is:unread newer_than:1d" },
+        "options": {}
+      },
+      "id": "gmail-get",
+      "name": "📬 Lấy Email (100)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [480, 500],
+      "credentials": {
+        "gmailOAuth2": { "id": "REPLACE_GMAIL_CRED_ID", "name": "Gmail OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pre-classify before sending to AI (reduces AI token cost)\nconst emails = $input.all();\n\nconst SPAM_PATTERNS = ['shopee', 'lazada', 'tiki', 'grab', 'noreply', 'no-reply', 'donotreply', 'unsubscribe'];\nconst PROMO_KW = ['giảm giá', 'flash sale', 'khuyến mãi', 'ưu đãi', '% off', 'sale', 'voucher', 'coupon'];\n\nconst preClassified = emails.map(item => {\n  const e = item.json;\n  const from = (e.from || '').toLowerCase();\n  const subject = (e.subject || '').toLowerCase();\n  const isObviousSpam = SPAM_PATTERNS.some(p => from.includes(p));\n  const isObviousPromo = PROMO_KW.some(kw => subject.includes(kw));\n\n  return {\n    id: e.id,\n    from: (e.from || '').replace(/<[^>]+>/g, '').trim(),\n    subject: e.subject || '(no subject)',\n    snippet: (e.snippet || e.textPlain || '').substring(0, 200),\n    date: e.date,\n    pre_category: isObviousSpam ? 'spam' : isObviousPromo ? 'promotion' : 'needs_ai_review'\n  };\n});\n\nconst needsReview = preClassified.filter(e => e.pre_category === 'needs_ai_review');\nconst obviousSpam = preClassified.filter(e => e.pre_category === 'spam');\nconst obviousPromo = preClassified.filter(e => e.pre_category === 'promotion');\n\nconsole.log(`Pre-classified: ${obviousSpam.length} spam, ${obviousPromo.length} promo, ${needsReview.length} needs AI`);\n\nreturn [{ json: {\n  all_emails: preClassified,\n  needs_ai_review: needsReview,\n  obvious_spam: obviousSpam,\n  obvious_promo: obviousPromo,\n  total: emails.length\n}}];"
+      },
+      "id": "pre-classify",
+      "name": "🔍 Pre-Classification (Rule-Based)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 500],
+      "notes": "Phân loại sơ bộ trước khi gọi AI. Mục đích: giảm token cost AI, chỉ gửi email cần phân tích."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare AI prompt with only emails needing review\nconst data = $input.first().json;\nconst emailsForAI = data.needs_ai_review;\n\nif (emailsForAI.length === 0) {\n  return [{ json: { skip_ai: true, ...data } }];\n}\n\nconst emailList = emailsForAI.map((e, i) =>\n  `[${i+1}] From: ${e.from}\\nSubject: ${e.subject}\\nSnippet: ${e.snippet}`\n).join('\\n---\\n');\n\nconst prompt = `Bạn là trợ lý quản lý email. Phân loại các email sau vào một trong các nhóm:\n- IMPORTANT: Từ sếp/khách hàng/đối tác, có deadline, cần phản hồi\n- WORK: Liên quan công việc nhưng không urgent\n- PERSONAL: Email cá nhân/gia đình\n- NEWSLETTER: Bản tin thông thường\n- SPAM: Quảng cáo, rác\n\nEmail cần phân loại:\n${emailList}\n\nTrả lời dạng JSON array, mỗi item có: index (1-based), category, reason_vi (lý do bằng tiếng Việt, ngắn gọn), action (\"keep_urgent\"/\"keep\"/\"archive\"/\"trash\"), priority (\"high\"/\"medium\"/\"low\").\n\nChỉ trả JSON, không giải thích thêm.`;\n\nreturn [{ json: { prompt, emails_for_ai: emailsForAI, pre_data: data } }];"
+      },
+      "id": "prepare-ai-prompt",
+      "name": "🤖 Chuẩn Bị AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 400],
+      "notes": "Chuẩn bị prompt tối ưu cho AI. Chỉ gửi email chưa rõ ràng, không gửi spam/promo đã biết."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [{
+            "id": "skip-ai-check",
+            "leftValue": "={{ $json.skip_ai }}",
+            "rightValue": true,
+            "operator": { "type": "boolean", "operation": "equals" }
+          }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-need-ai",
+      "name": "IF: Cần Gọi AI?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1200, 400],
+      "notes": "Nếu tất cả email đã được pre-classify → bỏ qua AI để tiết kiệm chi phí."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"{{ $json.prompt }}\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"maxOutputTokens\": 2048\n  }\n}",
+        "options": {}
+      },
+      "id": "call-gemini",
+      "name": "🧠 Gọi Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 300],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "REPLACE_GEMINI_CRED_ID",
+          "name": "Gemini API Key (Query: key)"
+        }
+      },
+      "notes": "⚠️ SECURITY NOTE: Dùng HTTP Query credential với key=YOUR_API_KEY. KHÔNG hardcode API key trực tiếp vào URL. Credential được mã hóa trong n8n database. Demo: Dùng Gemini 1.5 Flash (miễn phí tier)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response và kết hợp với pre-classification\nconst aiResponse = $input.first().json;\nconst prevData = $('🤖 Chuẩn Bị AI Prompt').first().json;\n\nlet aiResults = [];\ntry {\n  const rawText = aiResponse.candidates?.[0]?.content?.parts?.[0]?.text || '[]';\n  const jsonMatch = rawText.match(/\\[.*\\]/s);\n  if (jsonMatch) {\n    aiResults = JSON.parse(jsonMatch[0]);\n  }\n} catch(e) {\n  console.error('AI parse error:', e.message);\n  // Fallback: treat all AI emails as 'work'\n  aiResults = (prevData.emails_for_ai || []).map((_, i) => ({\n    index: i + 1, category: 'WORK', action: 'keep', priority: 'medium',\n    reason_vi: 'Không thể phân tích'\n  }));\n}\n\n// Combine AI results with email data\nconst emailsForAI = prevData.emails_for_ai || [];\nconst aiClassified = aiResults.map(r => ({\n  ...emailsForAI[r.index - 1],\n  category: r.category,\n  action: r.action,\n  priority: r.priority,\n  reason: r.reason_vi,\n  classified_by: 'ai'\n})).filter(Boolean);\n\n// Merge all classifications\nconst preData = prevData.pre_data;\nconst allEmails = [\n  ...aiClassified,\n  ...(preData.obvious_spam || []).map(e => ({ ...e, category: 'SPAM', action: 'trash', priority: 'low', classified_by: 'rule' })),\n  ...(preData.obvious_promo || []).map(e => ({ ...e, category: 'PROMOTION', action: 'archive', priority: 'low', classified_by: 'rule' }))\n];\n\nconst grouped = {\n  important: allEmails.filter(e => e.category === 'IMPORTANT'),\n  work: allEmails.filter(e => e.category === 'WORK'),\n  personal: allEmails.filter(e => e.category === 'PERSONAL'),\n  newsletter: allEmails.filter(e => e.category === 'NEWSLETTER' || e.pre_category === 'newsletter'),\n  promotion: allEmails.filter(e => e.category === 'PROMOTION' || e.pre_category === 'promotion'),\n  spam: allEmails.filter(e => e.category === 'SPAM' || e.pre_category === 'spam')\n};\n\nreturn [{ json: { grouped, all: allEmails, total: preData.total || allEmails.length } }];"
+      },
+      "id": "parse-ai-result",
+      "name": "🔗 Kết Hợp Kết Quả AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 300],
+      "notes": "Parse JSON từ AI response và kết hợp với kết quả rule-based. Có error handling khi AI trả về lỗi."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate comprehensive Telegram report\nconst data = $input.first().json;\nconst { grouped, total } = data;\n\nconst dateStr = new Date().toLocaleDateString('vi-VN', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  timeZone: 'Asia/Ho_Chi_Minh'\n});\n\nconst fmtSection = (arr, max = 3) => {\n  if (!arr || arr.length === 0) return '_Không có_';\n  const items = arr.slice(0, max).map((e, i) => {\n    const tag = e.classified_by === 'ai' ? '🤖' : '⚡';\n    const reason = e.reason ? ` _(${e.reason})_` : '';\n    return `  ${i+1}. *${(e.subject||'').substring(0, 50)}*${reason}\\n     📤 ${(e.from||'').substring(0, 38)} ${tag}`;\n  }).join('\\n');\n  const more = arr.length > max ? `\\n  _... và ${arr.length - max} email khác_` : '';\n  return items + more;\n};\n\n// Build priority section\nconst urgentEmails = (grouped.important || []).filter(e => e.priority === 'high');\nconst urgentSection = urgentEmails.length > 0\n  ? `\\n🚨 *CẦN XỬ LÝ NGAY:*\\n${fmtSection(urgentEmails)}`\n  : '';\n\nconst cleanupCount = (grouped.spam?.length || 0) + (grouped.promotion?.length || 0);\nconst toTrashIds = (grouped.spam || []).map(e => e.id).filter(Boolean);\nconst toArchiveIds = (grouped.promotion || []).map(e => e.id).filter(Boolean);\n\nconst mainReport = `🤖 *BÁO CÁO EMAIL AI - SÁNG NAY*\n📅 ${dateStr}\n━━━━━━━━━━━━━━━━━━━━━━\n\n📊 *Thống kê toàn bộ:*\n• ⭐ Quan trọng: ${grouped.important?.length || 0} email\n• 💼 Công việc: ${grouped.work?.length || 0} email\n• 👤 Cá nhân: ${grouped.personal?.length || 0} email\n• 📰 Newsletter: ${grouped.newsletter?.length || 0} email\n• 🏷️ Khuyến mãi: ${grouped.promotion?.length || 0} email\n• 🗑️ Spam: ${grouped.spam?.length || 0} email\n• 📨 *Tổng: ${total} email*\n${urgentSection}\n━━━━━━━━━━━━━━━━━━━━━━\n\n⭐ *QUAN TRỌNG:*\n${fmtSection(grouped.important)}\n\n💼 *CÔNG VIỆC:*\n${fmtSection(grouped.work)}\n\n━━━━━━━━━━━━━━━━━━━━━━\n🧹 Tự động dọn: *${cleanupCount} email* (spam + promo)\n🤖 Phân tích bởi Gemini AI`;\n\nreturn [{ json: { mainReport, toTrashIds, toArchiveIds, grouped, total } }];"
+      },
+      "id": "format-ai-report",
+      "name": "📊 Tạo Báo Cáo AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 300],
+      "notes": "Format báo cáo đầy đủ với kết quả AI phân tích. Hiển thị lý do phân loại của AI."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.mainReport }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "send-main-report",
+      "name": "📱 Gửi Báo Cáo Chính",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2160, 200],
+      "credentials": {
+        "telegramApi": { "id": "REPLACE_TELEGRAM_CRED_ID", "name": "Telegram Bot" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare spam IDs for trashing\nconst toTrashIds = $('📊 Tạo Báo Cáo AI').first().json.toTrashIds || [];\nconst toArchiveIds = $('📊 Tạo Báo Cáo AI').first().json.toArchiveIds || [];\n\nif (toTrashIds.length === 0 && toArchiveIds.length === 0) {\n  return [{ json: { nothing_to_clean: true } }];\n}\n\nconst tasks = [\n  ...toTrashIds.map(id => ({ emailId: id, action: 'trash' })),\n  ...toArchiveIds.map(id => ({ emailId: id, action: 'archive' }))\n];\n\nconsole.log(`Cleanup tasks: ${tasks.length} (${toTrashIds.length} trash, ${toArchiveIds.length} archive)`);\nreturn tasks.map(t => ({ json: t }));"
+      },
+      "id": "prepare-cleanup",
+      "name": "🧹 Chuẩn Bị Dọn Dẹp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [{
+            "id": "is-trash",
+            "leftValue": "={{ $json.action }}",
+            "rightValue": "trash",
+            "operator": { "type": "string", "operation": "equals" }
+          }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-trash-or-archive",
+      "name": "IF: Trash hay Archive?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2400, 400]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "trash",
+        "messageId": "={{ $json.emailId }}",
+        "options": {}
+      },
+      "id": "trash-email",
+      "name": "🗑️ Xóa Spam",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2640, 300],
+      "credentials": {
+        "gmailOAuth2": { "id": "REPLACE_GMAIL_CRED_ID", "name": "Gmail OAuth2" }
+      },
+      "notes": "⚠️ THẬN TRỌNG: Xóa email vào Thùng rác. Cần test kỹ trước khi dùng production."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "archive",
+        "messageId": "={{ $json.emailId }}",
+        "options": {}
+      },
+      "id": "archive-promo",
+      "name": "📁 Archive Promo",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2640, 500],
+      "credentials": {
+        "gmailOAuth2": { "id": "REPLACE_GMAIL_CRED_ID", "name": "Gmail OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.all();\nconst report = $('📊 Tạo Báo Cáo AI').first().json;\n\nconsole.log(`✅ V3 AI Pro completed: ${report.total} emails processed`);\nconsole.log(`🗑️ Trashed: ${report.toTrashIds?.length || 0}`);\nconsole.log(`📁 Archived: ${report.toArchiveIds?.length || 0}`);\n\nreturn [{\n  json: {\n    status: 'completed',\n    workflow_version: 'v3-ai-pro',\n    total_processed: report.total,\n    trashed: report.toTrashIds?.length || 0,\n    archived: report.toArchiveIds?.length || 0,\n    finished_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "final-log",
+      "name": "✅ Log Hoàn Tất",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2880, 400]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 5,
+        "filters": { "q": "is:unread newer_than:1d label:IMPORTANT" },
+        "options": {}
+      },
+      "id": "gmail-check-important",
+      "name": "⭐ Check Gmail Important Label",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1440, 700],
+      "credentials": {
+        "gmailOAuth2": { "id": "REPLACE_GMAIL_CRED_ID", "name": "Gmail OAuth2" }
+      },
+      "notes": "Chạy song song: Lấy email Gmail đã đánh dấu Important để bổ sung vào báo cáo."
+    }
+  ],
+  "connections": {
+    "⏰ Trigger 7h Sáng": { "main": [[{ "node": "📬 Lấy Email (100)", "type": "main", "index": 0 }]] },
+    "📬 Lấy Email (100)": { "main": [[{ "node": "🔍 Pre-Classification (Rule-Based)", "type": "main", "index": 0 }]] },
+    "🔍 Pre-Classification (Rule-Based)": { "main": [[{ "node": "🤖 Chuẩn Bị AI Prompt", "type": "main", "index": 0 }]] },
+    "🤖 Chuẩn Bị AI Prompt": { "main": [[{ "node": "IF: Cần Gọi AI?", "type": "main", "index": 0 }]] },
+    "IF: Cần Gọi AI?": {
+      "main": [
+        [{ "node": "📊 Tạo Báo Cáo AI", "type": "main", "index": 0 }],
+        [{ "node": "🧠 Gọi Gemini API", "type": "main", "index": 0 }]
+      ]
+    },
+    "🧠 Gọi Gemini API": { "main": [[{ "node": "🔗 Kết Hợp Kết Quả AI", "type": "main", "index": 0 }]] },
+    "🔗 Kết Hợp Kết Quả AI": { "main": [[{ "node": "📊 Tạo Báo Cáo AI", "type": "main", "index": 0 }]] },
+    "📊 Tạo Báo Cáo AI": {
+      "main": [
+        [{ "node": "📱 Gửi Báo Cáo Chính", "type": "main", "index": 0 }],
+        [{ "node": "🧹 Chuẩn Bị Dọn Dẹp", "type": "main", "index": 0 }]
+      ]
+    },
+    "🧹 Chuẩn Bị Dọn Dẹp": { "main": [[{ "node": "IF: Trash hay Archive?", "type": "main", "index": 0 }]] },
+    "IF: Trash hay Archive?": {
+      "main": [
+        [{ "node": "🗑️ Xóa Spam", "type": "main", "index": 0 }],
+        [{ "node": "📁 Archive Promo", "type": "main", "index": 0 }]
+      ]
+    },
+    "🗑️ Xóa Spam": { "main": [[{ "node": "✅ Log Hoàn Tất", "type": "main", "index": 0 }]] },
+    "📁 Archive Promo": { "main": [[{ "node": "✅ Log Hoàn Tất", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {
+    "📬 Lấy Email (100)": [
+      { "json": { "id": "ai-demo-1", "from": "CEO <ceo@company.com>", "subject": "Họp board Q2 - Cần confirm lịch", "date": "2026-05-11T06:45:00Z", "snippet": "Anh/chị có thể confirm lịch họp board Q2 vào 3pm thứ 6 không?" } },
+      { "json": { "id": "ai-demo-2", "from": "Client VIP <director@bigcorp.vn>", "subject": "Contract renewal - cần ký trước 30/5", "date": "2026-05-11T06:30:00Z", "snippet": "Hợp đồng cần ký trước ngày 30/5, budget 500M." } },
+      { "json": { "id": "ai-demo-3", "from": "Dev Team <dev@company.com>", "subject": "Production bug - user login broken", "date": "2026-05-11T06:00:00Z", "snippet": "Critical bug: users can't login since 6am. Need urgent fix." } },
+      { "json": { "id": "ai-demo-4", "from": "Medium <noreply@medium.com>", "subject": "Your weekly reading list", "date": "2026-05-11T05:30:00Z", "snippet": "Top stories this week. Unsubscribe from this newsletter." } },
+      { "json": { "id": "ai-demo-5", "from": "Shopee <deals@shopee.vn>", "subject": "Flash Sale Mega 6.6 - Giảm 70%!", "date": "2026-05-11T05:00:00Z", "snippet": "Ưu đãi khủng mừng 6.6, giảm giá sốc 70% hàng nghìn sản phẩm!" } },
+      { "json": { "id": "ai-demo-6", "from": "Mom <mom@gmail.com>", "subject": "Chủ nhật về nhà ăn cơm nha con", "date": "2026-05-11T04:30:00Z", "snippet": "Mẹ nấu bún bò, chủ nhật về nhé." } }
+    ]
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "tags": ["personal", "gmail", "telegram", "daily-report", "v3-ai-pro", "gemini", "spam-cleanup"],
+  "meta": {
+    "usage": "V3 AI PRO: 13 nodes. AI phân tích + báo cáo thông minh + tự động dọn dẹp.",
+    "difficulty": "⭐⭐⭐⭐ Advanced",
+    "nodes_count": 13,
+    "setup_time": "60 phút",
+    "ai_model": "Gemini 1.5 Flash (free tier)",
+    "security_notes": "API key dùng n8n credential, không hardcode. Spam filter cẩn thận để tránh xóa nhầm."
+  }
+}
