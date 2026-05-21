@@ -1,0 +1,638 @@
+{
+  "name": "Enterprise: Outlook & Slack Email Inbox Manager",
+  "nodes": [
+    {
+      "parameters": {
+        "event": "messageReceived",
+        "folderId": "Inbox",
+        "options": {}
+      },
+      "id": "outlook-trigger",
+      "name": "Outlook Trigger (New Email)",
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [100, 200],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "notes": "⚡ Trigger khi nhận email mới trong Inbox. Cần credentials Microsoft Graph API OAuth2. Thay OUTLOOK_CREDENTIAL_ID bằng ID credential thực trong n8n."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "slackChannelId",
+              "value": "YOUR_SLACK_CHANNEL_ID"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "config-vars",
+      "name": "Config Vars",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [250, 200],
+      "notes": "C\u1ea5u h\u00ecnh c\u00e1c bi\u1ebfn m\u00f4i tr\u01b0\u1eddng cho workflow (VD: Slack Channel ID)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Phân loại email dựa trên VIP senders, keywords khẩn cấp và loại trừ quảng cáo/newsletter\nconst email = $input.first().json;\n\n// Chỉ xử lý email chưa đọc\n// FIX: Thêm console.log để dễ debug khi email bị bỏ qua\nconst isRead = email.isRead === true;\nif (isRead) {\n  console.log(`[SKIP] Email đã đọc: id=${email.id} | subject=\"${email.subject}\" — bỏ qua, không xử lý.`);\n  return [];\n}\n\nconst subject = (email.subject || '').toLowerCase();\nconst fromAddress = (email.from?.emailAddress?.address || '').toLowerCase();\nconst fromName = email.from?.emailAddress?.name || '';\nconst bodyPreview = email.bodyPreview || '';\nconst bodyContent = (email.body?.content || '').toLowerCase();\nconst fullText = `${subject} ${fromAddress} ${bodyContent}`;\n\n// Danh sách người gửi VIP cần chú ý ngay lập tức\nconst vipSenders = [\n  'boss@company.com',\n  'director@company.com',\n  'important-client@corp.com',\n  'partner@company.com'\n];\n\n// Từ khóa khẩn cấp cần hành động ngay\nconst urgentKeywords = [\n  'urgent', 'khẩn', 'gấp', 'important', 'quan trọng', 'deadline', 'hạn chót',\n  'payment', 'thanh toán', 'overdue', 'quá hạn', 'cảnh báo', 'warning', 'incident', 'sự cố'\n];\n\n// Từ khóa bản tin hoặc email tự động không quan trọng\nconst newsletterKeywords = [\n  'unsubscribe', 'newsletter', 'digest', 'bản tin', 'hủy đăng ký',\n  'no-reply', 'noreply', 'do-not-reply', 'mailing list'\n];\n\n// Từ khóa khuyến mãi hoặc quảng cáo\nconst promoKeywords = [\n  'sale', 'discount', 'giảm giá', 'khuyến mãi', 'flash sale', 'ưu đãi',\n  'coupon', 'voucher', 'đặc biệt', 'quà tặng', 'offer', 'black friday'\n];\n\nconst isVip = vipSenders.some(sender => fromAddress.includes(sender));\nconst hasUrgent = urgentKeywords.some(kw => fullText.includes(kw));\nconst hasNewsletter = newsletterKeywords.some(kw => fullText.includes(kw));\nconst hasPromo = promoKeywords.some(kw => fullText.includes(kw));\n\nlet category = 'normal';\nlet action = 'notify_quiet';\nlet priority = 'medium';\n\nif (isVip || hasUrgent || email.importance === 'high') {\n  category = 'important';\n  action = 'notify_interactive';\n  priority = 'high';\n} else if (hasNewsletter || hasPromo) {\n  category = 'newsletter_promo';\n  action = 'auto_archive';\n  priority = 'low';\n} else {\n  category = 'normal';\n  action = 'notify_quiet';\n  priority = 'medium';\n}\n\nreturn [{\n  json: {\n    id: email.id,\n    subject: email.subject,\n    from: email.from,\n    bodyPreview: bodyPreview,\n    receivedDateTime: email.receivedDateTime,\n    importance: email.importance,\n    category: category,\n    action: action,\n    priority: priority,\n    classified_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "classify-email",
+      "name": "Classify Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 200],
+      "notes": "Phân loại email thành: important (cần tương tác), newsletter_promo (tự động lưu trữ), và normal (thông báo thường). FIX: Email đã đọc → return [] dừng execution không lỗi, có ghi console.log để debug."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "notify-interactive-check",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "notify_interactive",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "notify_interactive"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "auto-archive-check",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "auto_archive",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "auto_archive"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "notify-quiet-check",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "notify_quiet",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "notify_quiet"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-action",
+      "name": "Switch Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [500, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Slack Block Kit payload \u0111\u1ec3 g\u1eedi interactive message\nconst d = $input.first().json;\nconst slackChannelId = $('Config Vars').first().json.slackChannelId;\n\nconst fromName = d.from?.emailAddress?.name || 'Kh\u00f4ng r\u00f5';\nconst fromAddr = d.from?.emailAddress?.address || '';\nconst subject  = d.subject || '(Kh\u00f4ng c\u00f3 ti\u00eau \u0111\u1ec1)';\nconst preview  = d.bodyPreview || 'Kh\u00f4ng c\u00f3 n\u1ed9i dung xem tr\u01b0\u1edbc.';\nconst priority = d.priority || 'medium';\nconst emailId  = d.id || '';\nconst receivedAt = d.receivedDateTime\n  ? new Date(d.receivedDateTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })\n  : 'Kh\u00f4ng r\u00f5';\n\nconst blocks = [\n  {\n    type: 'header',\n    text: { type: 'plain_text', text: '\ud83d\udce7 Outlook Inbox Manager', emoji: true }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*Email quan tr\u1ecdng m\u1edbi!* \ud83d\udd34\n\n*Ng\u01b0\u1eddi g\u1eedi:* ${fromName} <${fromAddr}>\n*Ch\u1ee7 \u0111\u1ec1:* ${subject}\n*Th\u1eddi gian:* ${receivedAt}\n\n*Xem tr\u01b0\u1edbc:*\n> ${preview.substring(0, 200)}`\n    }\n  },\n  {\n    type: 'actions',\n    elements: [\n      {\n        type: 'button',\n        text: { type: 'plain_text', text: 'L\u01b0u tr\u1eef \ud83d\udce6', emoji: true },\n        style: 'primary',\n        value: emailId,\n        action_id: 'archive'\n      },\n      {\n        type: 'button',\n        text: { type: 'plain_text', text: '\u0110\u00e1nh d\u1ea5u \u0111\u00e3 \u0111\u1ecdc \u2705', emoji: true },\n        value: emailId,\n        action_id: 'mark_read'\n      },\n      {\n        type: 'button',\n        text: { type: 'plain_text', text: 'G\u1eafn c\u1edd \u2b50\ufe0f', emoji: true },\n        value: emailId,\n        action_id: 'flag'\n      }\n    ]\n  }\n];\n\nreturn [{\n  json: {\n    channel: slackChannelId,\n    text: `\ud83d\udce7 Email quan tr\u1ecdng t\u1eeb ${fromName}: ${subject}`,\n    blocks: blocks,\n    // Pass through email data\n    _emailId: emailId,\n    _subject: subject\n  }\n}];"
+      },
+      "id": "code-build-slack-blocks",
+      "name": "Code: Build Slack Blocks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 100],
+      "notes": "Build Block Kit JSON ph\u00eda JavaScript \u0111\u1ec3 \u0111\u1ea3m b\u1ea3o blocks \u0111\u01b0\u1ee3c serialize \u0111\u00fang."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $json.channel, text: $json.text, blocks: $json.blocks }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "slack-interactive-alert",
+      "name": "Slack: Interactive Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [920, 100],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SLACK_BOT_TOKEN_CREDENTIAL_ID",
+          "name": "Slack Bot Token"
+        }
+      },
+      "notes": "G\u1ecdi tr\u1ef1c ti\u1ebfp Slack chat.postMessage API v\u1edbi blocks JSON. Credential: HTTP Header Auth v\u1edbi Name='Authorization', Value='Bearer xoxb-YOUR-BOT-TOKEN'."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "move",
+        "messageId": "={{ $json.id }}",
+        "destinationId": "archive"
+      },
+      "id": "outlook-auto-archive",
+      "name": "Outlook: Auto Archive",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [720, 240],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "notes": "Tự động di chuyển email quảng cáo/newsletter vào thư mục Archive. FIX: Dùng destinationId='archive' (wellKnownFolderName hợp lệ theo Microsoft Graph API)."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "update",
+        "messageId": "={{ $json.id }}",
+        "updateFields": {
+          "isRead": true
+        }
+      },
+      "id": "outlook-mark-read-auto",
+      "name": "Outlook: Mark Read (Auto)",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [920, 240],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "notes": "Đánh dấu email quảng cáo/newsletter đã lưu trữ là đã đọc."
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": "={{ $('Config Vars').first().json.slackChannelId }}",
+        "sendAsText": true,
+        "text": "=📧 *Email thông thường:* \"{{ $json.subject || '(Không có tiêu đề)' }}\" từ *{{ $json.from?.emailAddress?.name || $json.from?.emailAddress?.address || 'Không rõ' }}*",
+        "otherOptions": {}
+      },
+      "id": "slack-quiet-alert",
+      "name": "Slack: Quiet Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [720, 380],
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CREDENTIAL_ID",
+          "name": "Slack account"
+        }
+      },
+      "notes": "FIX: Thêm '=' prefix để n8n evaluate expression trong text. Gửi thông báo text ngắn gọn, không làm ồn kênh."
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack-interactive-outlook",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "slack-webhook",
+      "name": "Slack Interactivity Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [100, 600],
+      "notes": "Lắng nghe sự kiện người dùng nhấn nút trên Slack. Cần cấu hình URL này trong Slack App → Interactive Components → Request URL: https://<n8n-host>/webhook/slack-interactive-outlook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// FIX: Parse payload an toàn với error handling rõ ràng\nconst body = $input.first().json.body;\n\nif (!body) {\n  throw new Error('Không tìm thấy body từ Slack webhook. Kiểm tra lại cấu hình Slack App Interactivity.');\n}\n\nif (!body.payload) {\n  throw new Error('Không tìm thấy payload trong body. Đảm bảo Slack gửi đúng định dạng application/x-www-form-urlencoded.');\n}\n\nlet payload;\ntry {\n  payload = JSON.parse(body.payload);\n} catch (e) {\n  throw new Error(`Không thể parse payload JSON từ Slack: ${e.message}`);\n}\n\nif (!payload.actions || payload.actions.length === 0) {\n  throw new Error('Payload không chứa actions. Có thể đây không phải sự kiện nút bấm.');\n}\n\nconst action = payload.actions[0];\nconst actionId = action.action_id; // 'archive', 'mark_read', 'flag'\nconst emailId = action.value;      // ID của email Outlook\nconst responseUrl = payload.response_url;\nconst userName = payload.user?.username || payload.user?.name || 'unknown';\nconst channelId = payload.channel?.id;\nconst messageTs = payload.message?.ts;\nconst originalBlocks = payload.message?.blocks || [];\n\nreturn [{\n  json: {\n    action_id: actionId,\n    email_id: emailId,\n    response_url: responseUrl,\n    user_name: userName,\n    channel_id: channelId,\n    message_ts: messageTs,\n    original_blocks: originalBlocks\n  }\n}];"
+      },
+      "id": "parse-slack-payload",
+      "name": "Parse Slack Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 600],
+      "notes": "FIX: Thêm error handling rõ ràng cho từng bước parse. Giải mã payload url-encoded của Slack và trả về action_id, email_id, response_url."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "archive-check",
+                    "leftValue": "={{ $json.action_id }}",
+                    "rightValue": "archive",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "archive"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "mark-read-check",
+                    "leftValue": "={{ $json.action_id }}",
+                    "rightValue": "mark_read",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "mark_read"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "flag-check",
+                    "leftValue": "={{ $json.action_id }}",
+                    "rightValue": "flag",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "flag"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-action-slack",
+      "name": "Switch Action Slack",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [500, 600]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "move",
+        "messageId": "={{ $json.email_id }}",
+        "destinationId": "archive"
+      },
+      "id": "outlook-action-archive",
+      "name": "Outlook Action: Archive",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [720, 500],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "notes": "FIX: Dùng destinationId thay folderId. 'archive' là wellKnownFolderName hợp lệ theo Microsoft Graph API."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "update",
+        "messageId": "={{ $json.email_id }}",
+        "updateFields": {
+          "isRead": true
+        }
+      },
+      "id": "outlook-action-mark-read",
+      "name": "Outlook Action: Mark Read",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [720, 620],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "update",
+        "messageId": "={{ $json.email_id }}",
+        "updateFields": {
+          "isRead": false,
+          "categories": [
+            "Important"
+          ]
+        }
+      },
+      "id": "outlook-action-flag",
+      "name": "Outlook Action: Flag & Category",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [720, 740],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "notes": "FIX: Đặt isRead=false (giữ nổi bật) + gán category 'Important'. ⚠️ Category 'Important' phải được tạo trước trong Outlook: Settings → Categories → New. Nếu muốn dùng flag thay category, cần HTTP Request node gọi Graph API PATCH /messages/{id} với body {\"flag\":{\"flagStatus\":\"flagged\"}}."
+    },
+    {
+      "parameters": {
+        "jsCode": "// FIX: Lấy dữ liệu từ Parse Slack Payload thông qua $() - an toàn trong cùng một execution\nconst slackData = $('Parse Slack Payload').first().json;\nconst originalBlocks = slackData.original_blocks || [];\nconst actionId = slackData.action_id;\nconst userName = slackData.user_name;\n\n// Xóa bỏ blocks chứa các nút bấm (actions) để tránh click lặp\nconst updatedBlocks = originalBlocks.filter(block => block.type !== 'actions');\n\nlet actionText = '';\nif (actionId === 'archive') {\n  actionText = '📦 Đã lưu trữ (Archived)';\n} else if (actionId === 'mark_read') {\n  actionText = '✅ Đã đánh dấu đã đọc (Marked Read)';\n} else if (actionId === 'flag') {\n  actionText = '⭐️ Đã gắn nhãn quan trọng (Flagged)';\n} else {\n  actionText = `❓ Hành động không xác định: ${actionId}`;\n}\n\nconst processedAt = new Date().toLocaleTimeString('vi-VN', {\n  timeZone: 'Asia/Ho_Chi_Minh',\n  hour: '2-digit',\n  minute: '2-digit',\n  second: '2-digit'\n});\n\n// Thêm context thông báo trạng thái mới bên dưới tin nhắn gốc\nupdatedBlocks.push({\n  \"type\": \"context\",\n  \"elements\": [\n    {\n      \"type\": \"mrkdwn\",\n      \"text\": `🟢 *Trạng thái:* ${actionText} | Người xử lý: *@${userName}* lúc ${processedAt}`\n    }\n  ]\n});\n\nreturn [{\n  json: {\n    response_url: slackData.response_url,\n    payload: {\n      blocks: updatedBlocks,\n      replace_original: true\n    }\n  }\n}];"
+      },
+      "id": "prepare-slack-update",
+      "name": "Prepare Slack Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 620],
+      "notes": "Cập nhật block kit gốc: xóa nút bấm, bổ sung badge trạng thái. Dùng $('Parse Slack Payload') để truy cập dữ liệu từ node upstream trong cùng execution."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.response_url }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "update-slack-message",
+      "name": "Update Slack Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1200, 620],
+      "notes": "FIX: Sửa cấu trúc body params — specifyBody và jsonBody phải nằm ở top-level parameters, không lồng trong bodyParameters. Dùng JSON.stringify($json.payload) để serialize đúng cách."
+    }
+  ],
+  "connections": {
+    "Outlook Trigger (New Email)": {
+      "main": [
+        [
+          {
+            "node": "Config Vars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config Vars": {
+      "main": [
+        [
+          {
+            "node": "Classify Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Email": {
+      "main": [
+        [
+          {
+            "node": "Switch Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Action": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Slack Blocks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Outlook: Auto Archive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack: Quiet Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Slack Blocks": {
+      "main": [
+        [
+          {
+            "node": "Slack: Interactive Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook: Auto Archive": {
+      "main": [
+        [
+          {
+            "node": "Outlook: Mark Read (Auto)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Interactivity Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Slack Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Slack Payload": {
+      "main": [
+        [
+          {
+            "node": "Switch Action Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Action Slack": {
+      "main": [
+        [
+          {
+            "node": "Outlook Action: Archive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Outlook Action: Mark Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Outlook Action: Flag & Category",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook Action: Archive": {
+      "main": [
+        [
+          {
+            "node": "Prepare Slack Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook Action: Mark Read": {
+      "main": [
+        [
+          {
+            "node": "Prepare Slack Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook Action: Flag & Category": {
+      "main": [
+        [
+          {
+            "node": "Prepare Slack Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Slack Update": {
+      "main": [
+        [
+          {
+            "node": "Update Slack Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": [
+    "enterprise",
+    "email",
+    "outlook",
+    "slack",
+    "automation",
+    "vietnamese"
+  ],
+  "triggerCount": 2,
+  "versionId": "1.1.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "outlook-slack-inbox",
+    "usage": "Hệ thống quản lý hộp thư Outlook chuyên nghiệp qua Slack, cho phép xử lý email nhanh (Lưu trữ, Đánh dấu đọc, Gắn cờ) ngay trên giao diện Slack.",
+    "version": "1.1.0",
+    "changelog": "v1.1.0: Fix Block Kit expressions (= prefix), fix HTTP body params, fix folderId→destinationId, fix categories+isRead, add credentials, add error handling in Parse Slack Payload, add console.log for skipped emails."
+  }
+}

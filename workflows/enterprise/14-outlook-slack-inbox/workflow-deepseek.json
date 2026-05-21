@@ -1,0 +1,503 @@
+{
+  "name": "Enterprise: Outlook & Slack Inbox Manager (DeepSeek AI)",
+  "nodes": [
+    {
+      "parameters": {
+        "event": "messageReceived",
+        "folderId": "Inbox",
+        "options": {}
+      },
+      "id": "outlook-trigger",
+      "name": "Outlook Trigger (New Email)",
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [100, 200],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "notes": "⚡ Trigger khi nhận email mới trong Inbox. Cần credentials Microsoft Graph API OAuth2."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "slackChannelId",
+              "value": "YOUR_SLACK_CHANNEL_ID"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "config-vars",
+      "name": "Config Vars",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [250, 200],
+      "notes": "C\u1ea5u h\u00ecnh c\u00e1c bi\u1ebfn m\u00f4i tr\u01b0\u1eddng cho workflow (VD: Slack Channel ID)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pre-process email — kiểm tra trạng thái đọc và chuẩn bị dữ liệu cho LLM Chain\nconst email = $input.first().json;\n\n// Bỏ qua email đã đọc\nif (email.isRead === true) {\n  console.log('[SKIP] Email đã đọc: id=' + email.id + ' subject=\"' + email.subject + '\"');\n  return [];\n}\n\nconst subject = email.subject || '(Không có tiêu đề)';\nconst fromAddress = email.from?.emailAddress?.address || '';\nconst fromName = email.from?.emailAddress?.name || 'Không rõ';\nconst bodyPreview = (email.bodyPreview || '').substring(0, 500);\nconst importance = email.importance || 'normal';\n\n// Pass through email data — prompt sẽ được build trong Chain node\nreturn [{\n  json: {\n    id: email.id,\n    subject: subject,\n    from: email.from,\n    from_name: fromName,\n    from_address: fromAddress,\n    bodyPreview: bodyPreview,\n    receivedDateTime: email.receivedDateTime,\n    importance: importance\n  }\n}];"
+      },
+      "id": "pre-process-email",
+      "name": "Pre-process Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 200],
+      "notes": "Kiểm tra email đã đọc (return [] nếu đã đọc) và chuẩn bị các trường dữ liệu. Prompt được build trực tiếp trong DeepSeek LLM Chain node bằng n8n expression."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Bạn là hệ thống phân loại email thông minh cho doanh nghiệp.\nPhân tích email được cung cấp và phân loại vào đúng 1 trong 3 nhóm sau.\n\nTrả về JSON object với các trường sau (không có markdown, không giải thích thêm):\n{\n  \"category\": \"important\" | \"newsletter_promo\" | \"normal\",\n  \"action\": \"notify_interactive\" | \"auto_archive\" | \"notify_quiet\",\n  \"priority\": \"high\" | \"medium\" | \"low\",\n  \"reason\": \"Lý do ngắn gọn tiếng Việt (tối đa 20 từ)\"\n}\n\nQuy tắc phân loại:\n- important + notify_interactive + high: Từ sếp/giám đốc/đối tác/khách VIP; chứa từ khóa khẩn cấp (urgent, deadline, payment, incident, sự cố, cảnh báo, khẩn, gấp); importance=high\n- newsletter_promo + auto_archive + low: Newsletter, quảng cáo, khuyến mãi, marketing, unsubscribe, no-reply, giảm giá, sale, coupon, ưu đãi\n- normal + notify_quiet + medium: Email thông thường không thuộc 2 nhóm trên\n\nEmail cần phân loại:\n<email>\nSubject: {{ $json.subject }}\nFrom: {{ $json.from_name }} <{{ $json.from_address }}>\nImportance: {{ $json.importance }}\nBody Preview: {{ $json.bodyPreview }}\n</email>",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "llm-chain-deepseek",
+      "name": "DeepSeek: Classify Email (Chain)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [520, 200],
+      "notes": "LLM Chain node nhận prompt với email data và gọi DeepSeek model để phân loại. Output: $json.text chứa JSON string kết quả. Model được kết nối qua ai_languageModel port (sub-node bên dưới)."
+    },
+    {
+      "parameters": {
+        "model": "deepseek-chat",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "deepseek-model",
+      "name": "DeepSeek: Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [520, 400],
+      "credentials": {
+        "deepSeekApi": {
+          "id": "DEEPSEEK_CREDENTIAL_ID",
+          "name": "DeepSeek API"
+        }
+      },
+      "notes": "DeepSeek Chat model (deepseek-chat). Credential: DeepSeek API với API Key từ platform.deepseek.com. Temperature=0.1 để phân loại nhất quán."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse JSON response từ DeepSeek LLM Chain\n// LLM Chain output: $json.text (string)\nconst emailData = $('Pre-process Email').first().json;\nconst rawText = $input.first().json.text || '';\n\n// Strip markdown code blocks nếu model bọc trong ```json\nlet cleanText = rawText.trim();\nif (cleanText.startsWith('```json')) {\n  cleanText = cleanText.replace(/^```json\\n?/, '').replace(/\\n?```$/, '');\n} else if (cleanText.startsWith('```')) {\n  cleanText = cleanText.replace(/^```\\n?/, '').replace(/\\n?```$/, '');\n}\n\nconst defaultClassification = {\n  category: 'normal',\n  action: 'notify_quiet',\n  priority: 'medium',\n  reason: 'Fallback: AI parse thất bại — dùng mặc định'\n};\n\nlet classification = Object.assign({}, defaultClassification);\n\ntry {\n  const parsed = JSON.parse(cleanText);\n  classification = Object.assign({}, defaultClassification, parsed);\n} catch (e) {\n  console.error('[ERROR] Parse DeepSeek response thất bại: ' + e.message);\n  console.error('Raw text (300 chars): ' + rawText.substring(0, 300));\n}\n\n// Validate và normalize — tránh giá trị không hợp lệ làm hỏng Switch node\nif (!['important','newsletter_promo','normal'].includes(classification.category)) classification.category = 'normal';\nif (!['notify_interactive','auto_archive','notify_quiet'].includes(classification.action)) classification.action = 'notify_quiet';\nif (!['high','medium','low'].includes(classification.priority)) classification.priority = 'medium';\n\nconsole.log('[DeepSeek] ' + classification.category + ' | ' + classification.action + ' | ' + classification.reason);\n\nreturn [{\n  json: {\n    id: emailData.id,\n    subject: emailData.subject,\n    from: emailData.from,\n    bodyPreview: emailData.bodyPreview,\n    receivedDateTime: emailData.receivedDateTime,\n    importance: emailData.importance,\n    category: classification.category,\n    action: classification.action,\n    priority: classification.priority,\n    ai_reason: classification.reason || '',\n    classified_by: 'deepseek-chat',\n    classified_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-deepseek-response",
+      "name": "Parse DeepSeek Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 200],
+      "notes": "Parse $json.text từ LLM Chain. Strip markdown wrapper nếu có, validate category/action/priority, fallback về 'normal' nếu parse lỗi. Merge lại với emailData từ Pre-process node."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "notify-interactive-check",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "notify_interactive",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "notify_interactive"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "auto-archive-check",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "auto_archive",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "auto_archive"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "notify-quiet-check",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "notify_quiet",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "notify_quiet"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-action",
+      "name": "Switch Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [960, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Slack Block Kit payload \u0111\u1ec3 g\u1eedi interactive message\nconst d = $input.first().json;\nconst slackChannelId = $('Config Vars').first().json.slackChannelId;\n\nconst fromName = d.from?.emailAddress?.name || 'Kh\u00f4ng r\u00f5';\nconst fromAddr = d.from?.emailAddress?.address || '';\nconst subject  = d.subject || '(Kh\u00f4ng c\u00f3 ti\u00eau \u0111\u1ec1)';\nconst preview  = d.bodyPreview || 'Kh\u00f4ng c\u00f3 n\u1ed9i dung xem tr\u01b0\u1edbc.';\nconst aiReason = d.ai_reason || 'N/A';\nconst priority = d.priority || 'medium';\nconst emailId  = d.id || '';\nconst receivedAt = d.receivedDateTime\n  ? new Date(d.receivedDateTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })\n  : 'Kh\u00f4ng r\u00f5';\n\nconst blocks = [\n  {\n    type: 'header',\n    text: { type: 'plain_text', text: '\ud83d\udce7 Outlook Inbox Manager', emoji: true }\n  },\n  {\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `*Email quan tr\u1ecdng m\u1edbi!* \ud83d\udd34\n\n*Ng\u01b0\u1eddi g\u1eedi:* ${fromName} <${fromAddr}>\n*Ch\u1ee7 \u0111\u1ec1:* ${subject}\n*Th\u1eddi gian:* ${receivedAt}\n\n*Xem tr\u01b0\u1edbc:*\n> ${preview.substring(0, 200)}`\n    }\n  },\n  {\n    type: 'context',\n    elements: [{\n      type: 'mrkdwn',\n      text: `\ud83e\udd16 *DeepSeek AI:* ${aiReason} | _Priority: ${priority}_`\n    }]\n  },\n  {\n    type: 'actions',\n    elements: [\n      {\n        type: 'button',\n        text: { type: 'plain_text', text: 'L\u01b0u tr\u1eef \ud83d\udce6', emoji: true },\n        style: 'primary',\n        value: emailId,\n        action_id: 'archive'\n      },\n      {\n        type: 'button',\n        text: { type: 'plain_text', text: '\u0110\u00e1nh d\u1ea5u \u0111\u00e3 \u0111\u1ecdc \u2705', emoji: true },\n        value: emailId,\n        action_id: 'mark_read'\n      },\n      {\n        type: 'button',\n        text: { type: 'plain_text', text: 'G\u1eafn c\u1edd \u2b50\ufe0f', emoji: true },\n        value: emailId,\n        action_id: 'flag'\n      }\n    ]\n  }\n];\n\nreturn [{\n  json: {\n    channel: slackChannelId,\n    text: `\ud83d\udce7 Email quan tr\u1ecdng t\u1eeb ${fromName}: ${subject}`,\n    blocks: blocks,\n    // Pass through email data \u0111\u1ec3 c\u00e1c node sau d\u00f9ng\n    _emailId: emailId,\n    _subject: subject\n  }\n}];"
+      },
+      "id": "code-build-slack-blocks",
+      "name": "Code: Build Slack Blocks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 80],
+      "notes": "Build Block Kit JSON ph\u00eda JavaScript \u0111\u1ec3 \u0111\u1ea3m b\u1ea3o blocks \u0111\u01b0\u1ee3c serialize \u0111\u00fang."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $json.channel, text: $json.text, blocks: $json.blocks }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "slack-interactive-alert",
+      "name": "Slack: Interactive Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1380, 80],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SLACK_BOT_TOKEN_CREDENTIAL_ID",
+          "name": "Slack Bot Token"
+        }
+      },
+      "notes": "G\u1ecdi tr\u1ef1c ti\u1ebfp Slack chat.postMessage API v\u1edbi blocks JSON. Credential: HTTP Header Auth v\u1edbi Name='Authorization', Value='Bearer xoxb-YOUR-BOT-TOKEN'. \u0110\u00e2y l\u00e0 c\u00e1ch tin c\u1eady nh\u1ea5t \u0111\u1ec3 g\u1eedi Block Kit interactive message."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "move",
+        "messageId": "={{ $json.id }}",
+        "destinationId": "archive"
+      },
+      "id": "outlook-auto-archive",
+      "name": "Outlook: Auto Archive",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [1180, 220],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "update",
+        "messageId": "={{ $json.id }}",
+        "updateFields": {
+          "isRead": true
+        }
+      },
+      "id": "outlook-mark-read-auto",
+      "name": "Outlook: Mark Read (Auto)",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [1380, 220],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": "={{ $('Config Vars').first().json.slackChannelId }}",
+        "text": "=📧 *Email thường:* \"{{ $json.subject || '(Không có tiêu đề)' }}\" từ *{{ $json.from?.emailAddress?.name || $json.from?.emailAddress?.address || 'Không rõ' }}*\n🤖 _DeepSeek: {{ $json.ai_reason || '' }}_",
+        "otherOptions": {}
+      },
+      "id": "slack-quiet-alert",
+      "name": "Slack: Quiet Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1180, 360],
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CREDENTIAL_ID",
+          "name": "Slack account"
+        }
+      },
+      "notes": "Thông báo text đơn giản (không dùng Block Kit). Xóa sendAsText vì đây là default mode của n8n Slack node v2.1."
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack-interactive-outlook",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "slack-webhook",
+      "name": "Slack Interactivity Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [100, 620],
+      "notes": "Lắng nghe sự kiện nút bấm từ Slack. Cấu hình trong Slack App → Interactive Components → Request URL: https://<n8n-host>/webhook/slack-interactive-outlook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nif (!body) throw new Error('Không tìm thấy body từ Slack webhook.');\nif (!body.payload) throw new Error('Không tìm thấy payload. Slack phải gửi application/x-www-form-urlencoded.');\n\nlet payload;\ntry { payload = JSON.parse(body.payload); } catch (e) { throw new Error('Không parse được payload JSON: ' + e.message); }\nif (!payload.actions?.length) throw new Error('Payload không chứa actions.');\n\nconst action = payload.actions[0];\nreturn [{ json: {\n  action_id: action.action_id,\n  email_id: action.value,\n  response_url: payload.response_url,\n  user_name: payload.user?.username || payload.user?.name || 'unknown',\n  channel_id: payload.channel?.id,\n  message_ts: payload.message?.ts,\n  original_blocks: payload.message?.blocks || []\n}}];"
+      },
+      "id": "parse-slack-payload",
+      "name": "Parse Slack Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 620]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [{ "id": "archive-check", "leftValue": "={{ $json.action_id }}", "rightValue": "archive", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "archive"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [{ "id": "mark-read-check", "leftValue": "={{ $json.action_id }}", "rightValue": "mark_read", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "mark_read"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [{ "id": "flag-check", "leftValue": "={{ $json.action_id }}", "rightValue": "flag", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "flag"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-action-slack",
+      "name": "Switch Action Slack",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [500, 620]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "move",
+        "messageId": "={{ $json.email_id }}",
+        "destinationId": "archive"
+      },
+      "id": "outlook-action-archive",
+      "name": "Outlook Action: Archive",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [720, 520],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "update",
+        "messageId": "={{ $json.email_id }}",
+        "updateFields": { "isRead": true }
+      },
+      "id": "outlook-action-mark-read",
+      "name": "Outlook Action: Mark Read",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [720, 640],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "update",
+        "messageId": "={{ $json.email_id }}",
+        "updateFields": { "isRead": false, "categories": ["Important"] }
+      },
+      "id": "outlook-action-flag",
+      "name": "Outlook Action: Flag & Category",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [720, 760],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OUTLOOK_CREDENTIAL_ID",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "notes": "⚠️ Category 'Important' phải được tạo trước trong Outlook Settings → Categories."
+    },
+    {
+      "parameters": {
+        "jsCode": "const slackData = $('Parse Slack Payload').first().json;\nconst updatedBlocks = (slackData.original_blocks || []).filter(b => b.type !== 'actions');\nconst actionMap = { archive: '📦 Đã lưu trữ', mark_read: '✅ Đã đánh dấu đã đọc', flag: '⭐️ Đã gắn nhãn quan trọng' };\nconst actionText = actionMap[slackData.action_id] || '❓ Hành động: ' + slackData.action_id;\nconst processedAt = new Date().toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', second: '2-digit' });\nupdatedBlocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: '🟢 *Trạng thái:* ' + actionText + ' | Người xử lý: *@' + slackData.user_name + '* lúc ' + processedAt }] });\nreturn [{ json: { response_url: slackData.response_url, payload: { blocks: updatedBlocks, replace_original: true } } }];"
+      },
+      "id": "prepare-slack-update",
+      "name": "Prepare Slack Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 640]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.response_url }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": { "timeout": 5000 }
+      },
+      "id": "update-slack-message",
+      "name": "Update Slack Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1200, 640]
+    }
+  ],
+  "connections": {
+    "Outlook Trigger (New Email)": {
+      "main": [[{ "node": "Config Vars", "type": "main", "index": 0 }]]
+    },
+    "Config Vars": {
+      "main": [[{ "node": "Pre-process Email", "type": "main", "index": 0 }]]
+    },
+    "Pre-process Email": {
+      "main": [[{ "node": "DeepSeek: Classify Email (Chain)", "type": "main", "index": 0 }]]
+    },
+    "DeepSeek: Classify Email (Chain)": {
+      "main": [[{ "node": "Parse DeepSeek Response", "type": "main", "index": 0 }]]
+    },
+    "DeepSeek: Model": {
+      "ai_languageModel": [[{ "node": "DeepSeek: Classify Email (Chain)", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Parse DeepSeek Response": {
+      "main": [[{ "node": "Switch Action", "type": "main", "index": 0 }]]
+    },
+    "Switch Action": {
+      "main": [
+        [{ "node": "Code: Build Slack Blocks", "type": "main", "index": 0 }],
+        [{ "node": "Outlook: Auto Archive", "type": "main", "index": 0 }],
+        [{ "node": "Slack: Quiet Alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Build Slack Blocks": {
+      "main": [[{ "node": "Slack: Interactive Alert", "type": "main", "index": 0 }]]
+    },
+    "Outlook: Auto Archive": {
+      "main": [[{ "node": "Outlook: Mark Read (Auto)", "type": "main", "index": 0 }]]
+    },
+    "Slack Interactivity Webhook": {
+      "main": [[{ "node": "Parse Slack Payload", "type": "main", "index": 0 }]]
+    },
+    "Parse Slack Payload": {
+      "main": [[{ "node": "Switch Action Slack", "type": "main", "index": 0 }]]
+    },
+    "Switch Action Slack": {
+      "main": [
+        [{ "node": "Outlook Action: Archive", "type": "main", "index": 0 }],
+        [{ "node": "Outlook Action: Mark Read", "type": "main", "index": 0 }],
+        [{ "node": "Outlook Action: Flag & Category", "type": "main", "index": 0 }]
+      ]
+    },
+    "Outlook Action: Archive": {
+      "main": [[{ "node": "Prepare Slack Update", "type": "main", "index": 0 }]]
+    },
+    "Outlook Action: Mark Read": {
+      "main": [[{ "node": "Prepare Slack Update", "type": "main", "index": 0 }]]
+    },
+    "Outlook Action: Flag & Category": {
+      "main": [[{ "node": "Prepare Slack Update", "type": "main", "index": 0 }]]
+    },
+    "Prepare Slack Update": {
+      "main": [[{ "node": "Update Slack Message", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": ["enterprise", "email", "outlook", "slack", "ai", "deepseek", "langchain", "vietnamese"],
+  "triggerCount": 2,
+  "versionId": "2.1.0-deepseek",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "outlook-slack-inbox-deepseek",
+    "usage": "Phiên bản dùng n8n native DeepSeek LangChain node (@n8n/n8n-nodes-langchain.lmChatDeepSeek) thay vì HTTP Request. Pattern: chainLlm + lmChatDeepSeek (kết nối qua ai_languageModel port).",
+    "changelog": "v2.1.0: Thay HTTP Request → chainLlm + lmChatDeepSeek (native n8n LangChain nodes). Credential: deepSeekApi. Model kết nối qua ai_languageModel sub-port."
+  }
+}

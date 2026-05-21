@@ -18,10 +18,10 @@
 | Category | Workflows | Guides | Status |
 |----------|-----------|--------|--------|
 | Personal | 9 | 9 | ✅ 100% |
-| Enterprise | 13 | 11 | ✅ 100% |
+| Enterprise | 14 | 12 | ✅ 100% |
 | Education | 3 | 2 | ✅ 100% |
 | Common Patterns | 3 | 0 | ✅ 100% |
-| **Total** | **28** | **22** | **✅ DONE** |
+| **Total** | **29** | **23** | **✅ DONE** |
 
 ---
 
@@ -39,7 +39,7 @@ workflows/
 │   ├── 06-learning-digest/       ✅ workflow.json + GUIDE.md
 │   ├── 07-habit-tracker/         ✅ workflow.json + GUIDE.md
 │   └── 08-meeting-notes/         ✅ workflow.json + GUIDE.md
-├── enterprise/                    # ✅ 13 workflows + 11 guides
+├── enterprise/                    # ✅ 14 workflows + 12 guides
 │   ├── 01-lead-capture-crm/      ✅ workflow.json + GUIDE.md
 │   ├── 02-email-campaign/        ✅ workflow.json + GUIDE.md
 │   ├── 03-order-fulfillment/     ✅ workflow.json + GUIDE.md
@@ -52,7 +52,8 @@ workflows/
 │   ├── 10-re-engagement-campaign/✅ workflow.json
 │   ├── 11-meeting-transcript-ai/ ✅ workflow.json + GUIDE.md
 │   ├── 12-telegram-ai-company-chatbot/ ✅ workflow.json + GUIDE.md
-│   └── 13-candidate-cv-screening/ ✅ workflow.json + GUIDE.md
+│   ├── 13-candidate-cv-screening/ ✅ workflow.json + GUIDE.md
+│   └── 14-outlook-slack-inbox/   ✅ workflow.json + GUIDE.md
 ├── education/                     # ✅ 3 workflows + 2 guides
 │   ├── 01-quiz-generator-v3/     ✅ (existing)
 │   ├── 02-google-form-email/     ✅ (existing)
@@ -98,6 +99,7 @@ workflows/
 | 11 | [Meeting Transcript AI](enterprise/11-meeting-transcript-ai/) | Phân tích transcript → biên bản họp (Gemini/DeepSeek + Email + Sheets + Telegram) | ⭐⭐⭐⭐ | ✅ JSON + GUIDE |
 | 12 | [Telegram AI Company Chatbot](enterprise/12-telegram-ai-company-chatbot/) | Chatbot Telegram dùng AI Agent trả lời theo file JSON quy trình + sản phẩm | ⭐⭐⭐ | ✅ JSON + GUIDE |
 | 13 | [Candidate CV Screening](enterprise/13-candidate-cv-screening/) | Google Form CV PDF/DOCX → DeepSeek đánh giá theo JD → tracking Sheet + Telegram excellent | ⭐⭐⭐⭐ | ✅ JSON + GUIDE |
+| 14 | [Outlook & Slack Inbox Manager](enterprise/14-outlook-slack-inbox/) | Quản lý Outlook Email qua Slack tương tác hai chiều | ⭐⭐⭐⭐ | ✅ JSON + GUIDE |
 
 ### 🎓 Education Workflows (3/3 ✅)
 
@@ -236,5 +238,5 @@ To contribute:
 **Created:** 2026-05-05
 **Last Updated:** 2026-05-05
 **Version:** 1.0.0 — **COMPLETE**
-**Total Workflows:** 28
-**Total Documentation:** 22 GUIDE files
+**Total Workflows:** 29
+**Total Documentation:** 23 GUIDE files
