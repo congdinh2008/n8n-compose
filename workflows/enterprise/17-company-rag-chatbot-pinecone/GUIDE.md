@@ -57,8 +57,12 @@ Workflow này xây dựng **chatbot hỏi đáp nội bộ công ty** sử dụn
 |------|---------|
 | `company_knowledge.json` | Dữ liệu tri thức mẫu của công ty (thay bằng dữ liệu thật của bạn) |
 | `01-ingest.json` | Workflow nạp dữ liệu vào Pinecone (chạy tay) |
-| `02-chatbot.json` | Workflow chatbot AI Agent + RAG Pinecone + DeepSeek |
+| `02-chatbot.json` | Workflow chatbot AI Agent + RAG Pinecone + DeepSeek — giao diện **Chat UI** tích hợp sẵn của n8n |
+| `03-telegram-chatbot.json` | **Phiên bản Telegram (DeepSeek)** — cùng RAG Pinecone, trả lời qua bot Telegram (xem [mục 14](#14-phiên-bản-telegram-bot)) |
+| `04-telegram-chatbot-gemini.json` | **Phiên bản Telegram (Gemini)** — giống `03` nhưng dùng Google Gemini làm model. **Khuyến nghị dùng bản này** vì Gemini gọi tool ổn định với AI Agent (DeepSeek hiện lỗi `reasoning_content` khi tool calling — xem [mục 14.8](#148-vì-sao-có-2-phiên-bản-telegram-deepseek-vs-gemini)) |
 | `GUIDE.md` | Tài liệu này |
+
+> **Hai phiên bản chatbot dùng chung một kho dữ liệu Pinecone.** Cả `02-chatbot.json` (Chat UI) và `03-telegram-chatbot.json` (Telegram) đều truy vấn cùng index `company-kb` / namespace `company` đã nạp bằng `01-ingest.json`. Bạn chỉ cần nạp dữ liệu **một lần**, rồi chọn dùng giao diện nào tùy nhu cầu (hoặc dùng cả hai).
 
 ---
 
@@ -333,11 +337,8 @@ Mở file `company_knowledge.json`, thêm section mới (VD: `"promotions"`, `"a
 
 ### 10.4 Tích hợp vào Telegram hoặc Slack
 
-Thay **Chat Trigger** bằng:
-- **Telegram Trigger** → gửi trả lời qua Telegram node
-- **Slack Trigger (app_mention)** → gửi trả lời qua Slack node
-
-Tham khảo workflow `12-telegram-ai-company-chatbot` và `16-slack-product-rag-agent` trong repo này.
+- **Telegram**: dùng file `03-telegram-chatbot.json` có sẵn trong thư mục này → xem hướng dẫn chi tiết ở [mục 14](#14-phiên-bản-telegram-bot).
+- **Slack (app_mention)**: tham khảo workflow `16-slack-product-rag-agent` trong repo này.
 
 ---
 
@@ -407,3 +408,155 @@ Với demo và thử nghiệm, tổng chi phí thường **dưới $1/tháng**.
   ]
 }
 ```
+
+---
+
+## 14. Phiên bản Telegram Bot
+
+File `03-telegram-chatbot.json` là **phiên bản chatbot trả lời qua Telegram**, dùng **chung kho dữ liệu Pinecone** đã nạp bằng `01-ingest.json` (không cần nạp lại). Thay vì Chat UI của n8n, người dùng nhắn tin trực tiếp cho bot Telegram và nhận câu trả lời RAG ngay trong Telegram.
+
+### 14.1 Kiến trúc workflow Telegram
+
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║  WORKFLOW 3 — CHATBOT TELEGRAM (activate để chạy nền liên tục)      ║
+║                                                                      ║
+║  Telegram Trigger (nhận message)                                     ║
+║    → Code: Tách Message & Chat ID (ép chat_id về String)            ║
+║    → IF: Có Text?                                                   ║
+║        ├─ TRUE → AI Agent                                           ║
+║        │         ↑ DeepSeek Chat Model ───────── ai_languageModel  ║
+║        │         ↑ Window Buffer Memory ───────── ai_memory        ║
+║        │            (sessionKey = chat_id, customKey)               ║
+║        │         ↑ Pinecone RAG Tool [RETRIEVE-AS-TOOL] ─ ai_tool   ║
+║        │            ↑ Gemini Embeddings (gemini-embedding-001)       ║
+║        │      → Code: Format câu trả lời (cắt 3900 ký tự)           ║
+║        │      → Telegram: Gửi Trả Lời                               ║
+║        └─ FALSE → Telegram: Nhắc người dùng gửi bằng chữ            ║
+╚══════════════════════════════════════════════════════════════════════╝
+```
+
+> Embedding **bắt buộc** dùng đúng model `models/gemini-embedding-001` như `01-ingest.json` — sai model thì vector câu hỏi không khớp không gian vector đã nạp, RAG trả về rỗng mà **không báo lỗi**.
+
+### 14.2 Tạo Telegram Bot và Credential
+
+1. Mở Telegram, chat với **@BotFather** → gõ `/newbot` → đặt tên + username cho bot → BotFather trả về **bot token** (dạng `123456789:ABC...`).
+2. Vào n8n → **Credentials** → **New** → tìm **"Telegram API"** → dán token → Lưu với tên `Telegram Bot`.
+
+### 14.3 ⚠️ Bắt buộc: WEBHOOK_URL công khai (HTTPS)
+
+Telegram **đẩy** tin nhắn tới n8n qua webhook, nên n8n phải có **URL công khai** mà server Telegram gọi tới được. Mặc định repo này chạy n8n ở `127.0.0.1:5678` (chỉ truy cập được trên máy bạn) → Telegram **không gửi tin tới được**.
+
+Cách xử lý cho môi trường local (chọn 1 trong 2):
+
+**Cách 1 — ngrok (nhanh nhất để test):**
+
+```bash
+ngrok http 5678
+# ngrok trả về 1 URL HTTPS, ví dụ: https://abcd-1234.ngrok-free.app
+```
+
+Sửa file `.env` của repo:
+
+```env
+N8N_HOST=abcd-1234.ngrok-free.app
+N8N_PROTOCOL=https
+WEBHOOK_URL=https://abcd-1234.ngrok-free.app/
+```
+
+**Cách 2 — Cloudflare Tunnel** (ổn định hơn cho demo dài): tạo tunnel trỏ về `localhost:5678`, rồi điền domain HTTPS của tunnel vào `WEBHOOK_URL` tương tự.
+
+Sau khi sửa `.env`, **khởi động lại** n8n để nhận biến mới:
+
+```bash
+docker compose up -d
+```
+
+> n8n chỉ đăng ký webhook với Telegram **khi workflow được Activate** và dùng giá trị `WEBHOOK_URL` lúc đó. Vì vậy phải set `WEBHOOK_URL` công khai **trước**, restart, **rồi mới Activate** workflow.
+>
+> Nếu bạn đã deploy n8n trên domain HTTPS thật (production) thì `WEBHOOK_URL` đã đúng sẵn, bỏ qua bước ngrok/tunnel.
+
+### 14.4 Import và gán credentials cho Workflow 03
+
+1. n8n → **Workflows** → **Import from File** → chọn `03-telegram-chatbot.json`.
+2. Gán credentials:
+
+| Node | Credential cần gán |
+|------|---------------------|
+| `📩 Telegram Trigger: Nhận Tin Nhắn` | `Telegram Bot` |
+| `📤 Telegram: Gửi Trả Lời` | `Telegram Bot` |
+| `📤 Telegram: Nhắc Gửi Text` | `Telegram Bot` |
+| `🧠 DeepSeek Chat Model` | `DeepSeek account` |
+| `🔎 RAG: Company Knowledge Base` | `Pinecone account` |
+| `🔢 Gemini Embeddings` | `Google Gemini(PaLM) Api account` |
+
+> Credentials DeepSeek / Pinecone / Gemini **dùng lại** từ phần [Bước 2 (mục 5)](#5-bước-2--tạo-credentials-trên-n8n) — không cần tạo mới.
+
+### 14.5 Kích hoạt và Test
+
+1. Đảm bảo đã chạy `01-ingest.json` (Pinecone có dữ liệu — xem [mục 7.3](#73-kiểm-tra-kết-quả-nạp-dữ-liệu)).
+2. Bật toggle **Inactive → Active** cho workflow 03.
+3. Mở Telegram → tìm bot của bạn theo username → nhấn **Start** → nhắn câu hỏi, ví dụ:
+
+```
+Công ty có những sản phẩm/dịch vụ gì?
+Quy trình nghỉ phép như thế nào?
+Chính sách WFH của công ty ra sao?
+```
+
+4. Bot trả lời dựa trên dữ liệu công ty trong Pinecone. Mỗi đoạn chat (chat_id) có bộ nhớ hội thoại riêng (10 lượt gần nhất).
+
+### 14.6 Xử lý sự cố riêng cho Telegram
+
+| Triệu chứng | Nguyên nhân | Cách xử lý |
+|---|---|---|
+| Nhắn bot nhưng workflow không chạy | `WEBHOOK_URL` chưa public, hoặc chưa Activate | Set `WEBHOOK_URL` HTTPS công khai → `docker compose up -d` → Activate lại workflow |
+| Lỗi `No session ID found` ở Window Buffer Memory | Memory để mặc định `fromInput` (chờ field `sessionId` của Chat Trigger) | Node memory phải đặt **Session ID = "Define below"** và Key = `chat_id` (file đã set sẵn `sessionIdType=customKey`) |
+| Lỗi `reasoning_content in the thinking mode must be passed back` ở node DeepSeek | Bug n8n: AI Agent không gửi lại `reasoning_content` khi DeepSeek thinking mode gọi tool nhiều lượt | Dùng file **`04-telegram-chatbot-gemini.json`** (model Gemini) — xem [mục 14.8](#148-vì-sao-có-2-phiên-bản-telegram-deepseek-vs-gemini) |
+| Bot không nhận khi gửi ảnh/sticker | Tin không có text | Bình thường — nhánh FALSE sẽ nhắc người dùng gửi bằng chữ |
+| Bot trả lời "không tìm thấy" dù có data | Chưa chạy 01-ingest, sai namespace, hoặc sai model embedding | Pinecone phải có vectors > 0; namespace = `company`; embedding = `models/gemini-embedding-001` (khớp ingest) |
+| Lỗi `can't parse entities: Can't find end of the entity...` khi gửi | Node Telegram **tự ép `parse_mode=Markdown`** nếu không set → câu trả lời AI có `*`/`_`/`[` không cân làm vỡ parser | File đã set `parse_mode=HTML` + escape `& < >` ở node Format + `appendAttribution=false`. Giữ nguyên cấu hình này; nếu tự sửa, đừng để trống parse_mode |
+| Câu trả lời bị cắt cụt | Vượt giới hạn ~4096 ký tự của Telegram | Node Format đã cắt 3900 ký tự; có thể giảm `maxTokens` của DeepSeek nếu cần ngắn hơn |
+
+### 14.7 So sánh các phiên bản chatbot
+
+| Tiêu chí | `02-chatbot.json` (Chat UI) | `03` / `04` (Telegram) |
+|---|---|---|
+| Giao diện | Chat UI tích hợp sẵn n8n | App Telegram (điện thoại + máy tính) |
+| Cần URL public | ❌ Không | ✅ Có (Telegram đẩy webhook) |
+| Phân tách hội thoại | Theo session trình duyệt (mỗi tab) | Theo `chat_id` Telegram (mỗi người/nhóm) |
+| Phù hợp | Demo nhanh, nhúng nội bộ | Người dùng cuối, hỗ trợ khách hàng thực tế |
+| Kho dữ liệu Pinecone | Chung index `company-kb` / ns `company` | Chung index `company-kb` / ns `company` |
+
+### 14.8 Vì sao có 2 phiên bản Telegram? (DeepSeek vs Gemini)
+
+Hai file `03-telegram-chatbot.json` (DeepSeek) và `04-telegram-chatbot-gemini.json` (Gemini) có **kiến trúc RAG y hệt nhau** — chỉ khác **model ngôn ngữ** gắn vào AI Agent.
+
+**Kiến trúc này đã chuẩn RAG chưa?** Có. Đây là **Agentic RAG** đúng chuẩn: AI Agent nhận câu hỏi → gọi tool `company_knowledge` (Pinecone retrieve-as-tool) → Gemini Embeddings chuyển câu hỏi thành vector → Pinecone trả về top-5 đoạn liên quan → model tổng hợp câu trả lời chỉ dựa trên ngữ cảnh tìm được. Phần truy xuất (retrieval) hoạt động tốt; lỗi gặp phải **không nằm ở RAG** mà ở **bước model gọi tool**.
+
+**Vấn đề với DeepSeek:** Từ bản DeepSeek V3.2 trở đi, các model có "thinking mode" (suy luận) yêu cầu: mỗi message của model có `tool_calls` khi gửi lại API **phải kèm field `reasoning_content`**. AI Agent của n8n hiện **chưa gửi lại** field này trong vòng gọi tool thứ 2 → DeepSeek trả lỗi:
+
+```
+Bad request - please check your parameters.
+The reasoning_content in the thinking mode must be passed back to the API.
+```
+
+Đây là **lỗi đã biết của n8n** (xem các issue n8n-io/n8n #22579, #29119), xảy ra khi **AI Agent + DeepSeek + gọi tool**. Cách sửa của cộng đồng cần cài community node `n8n-nodes-deepseek-v4-thinking-fix` — nhưng repo này chủ trương **chỉ dùng node built-in**, nên không khuyến khích.
+
+**Giải pháp trong repo này:** Dùng **Google Gemini** (`models/gemini-2.5-flash`) làm model cho AI Agent — Gemini hỗ trợ function/tool calling ổn định, không gặp lỗi trên. Thêm điểm tiện: Gemini **dùng chung credential** `Google Gemini(PaLM) Api account` đã tạo cho Embeddings → **không cần thêm credential mới**.
+
+| Phương án | Ưu | Nhược |
+|---|---|---|
+| **`04` — Gemini (khuyến nghị)** | Tool calling ổn định; dùng lại credential Gemini; không cài thêm gì | Cần Gemini API key (đã có sẵn cho embedding) |
+| `03` — DeepSeek | Chi phí rất rẻ; câu trả lời tự nhiên | **Lỗi `reasoning_content` khi gọi tool** với model thinking mode → cần đổi sang model DeepSeek không-thinking, hoặc cài community node |
+
+> **Tóm lại:** Để chatbot Telegram RAG chạy ngay, hãy dùng **`04-telegram-chatbot-gemini.json`**. Giữ `03` (DeepSeek) làm tài liệu tham khảo / dùng khi n8n đã vá lỗi hoặc khi bạn chọn model DeepSeek không bật thinking mode.
+
+**Gán credentials cho `04`** (giống `03` nhưng thay model):
+
+| Node | Credential |
+|------|-----------|
+| 3 node Telegram | `Telegram Bot` |
+| `🧠 Google Gemini Chat Model` | `Google Gemini(PaLM) Api account` |
+| `🔎 RAG: Company Knowledge Base` | `Pinecone account` |
+| `🔢 Gemini Embeddings` | `Google Gemini(PaLM) Api account` |
