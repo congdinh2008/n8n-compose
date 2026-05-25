@@ -1,0 +1,239 @@
+{
+  "name": "17 · RAG Ingest: Nạp Company Knowledge vào Pinecone (Gemini Embedding)",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Nạp Dữ Liệu Công Ty vào Pinecone",
+        "formDescription": "Upload file company_knowledge.json để nạp tri thức công ty vào Pinecone vector store. Chỉ chấp nhận file .json.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "data",
+              "fieldType": "file",
+              "requiredField": true,
+              "acceptFileTypes": ".json",
+              "multipleFiles": false
+            }
+          ]
+        },
+        "options": {
+          "respondWith": "text",
+          "responseText": "✅ File đã được nhận! Quá trình nạp dữ liệu vào Pinecone đang chạy. Kiểm tra kết quả trong tab Executions của n8n."
+        }
+      },
+      "id": "wf17-node-001",
+      "name": "📁 Form Upload company_knowledge.json",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [240, 360],
+      "webhookId": "wf17-form-ingest-001",
+      "notes": "Form upload: truy cập URL webhook sau khi Activate workflow → chọn file company_knowledge.json từ máy tính → Submit. Không cần docker cp hay bất kỳ lệnh terminal nào. File .json được nhận dưới dạng binary với key 'data' → chuyển trực tiếp sang node Parse JSON."
+    },
+    {
+      "parameters": {
+        "operation": "fromJson",
+        "options": {}
+      },
+      "id": "wf17-node-003",
+      "name": "🧷 Parse JSON Từ File",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [460, 360],
+      "notes": "Chuyển binary file → object JSON. Toàn bộ nội dung company_knowledge.json nằm trong $json.data."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Biến company_knowledge.json thành danh sách 'documents' để nạp vào Pinecone.\n// Mỗi entry (sản phẩm, quy trình, chính sách, FAQ) → 1 document có `text` + metadata.\n\nconst root = $input.first().json.data || $input.first().json;\nconst company = root.company || {};\nconst products = root.products || [];\nconst processes = root.processes || [];\nconst policies = root.policies || {};\nconst faqs = root.faq || [];\n\nconst vnd = (n) => (typeof n === 'number' && n > 0 ? n.toLocaleString('vi-VN') + 'đ' : 'Liên hệ báo giá');\nconst docs = [];\n\n// --- Thông tin công ty ---\nif (company.name) {\n  docs.push({\n    json: {\n      text: [\n        `THÔNG TIN CÔNG TY: ${company.name} — ${company.tagline || ''}`,\n        `Hotline: ${company.hotline || ''} | Email: ${company.email || ''}`,\n        `Website: ${company.website || ''} | Địa chỉ: ${company.address || ''}`,\n        `Giờ làm việc: ${company.working_hours || ''}`,\n        `Thành lập: ${company.founded || ''} | Quy mô: ${company.employees || ''} nhân viên`,\n        `Mô tả: ${company.description || ''}`\n      ].filter(Boolean).join('\\n'),\n      doc_type: 'company_info',\n      ref_id: 'company',\n      title: company.name,\n      category: 'Thông tin công ty'\n    }\n  });\n}\n\n// --- Sản phẩm / Dịch vụ ---\nfor (const p of products) {\n  const features = Array.isArray(p.features)\n    ? p.features.map(f => `  - ${f}`).join('\\n')\n    : (Array.isArray(p.scope) ? p.scope.map(f => `  - ${f}`).join('\\n') : '');\n  const techList = Array.isArray(p.technologies) ? `Công nghệ: ${p.technologies.join(', ')}` : '';\n\n  docs.push({\n    json: {\n      text: [\n        `SẢN PHẨM/DỊCH VỤ: ${p.name} (mã ${p.id})`,\n        `Danh mục: ${p.category}`,\n        `Giá: ${vnd(p.price)} ${p.price_unit || ''}`.trim(),\n        `Tình trạng: ${p.in_stock ? 'Còn hàng / Đang cung cấp' : 'Hết hàng'}`,\n        p.warranty_months ? `Bảo hành: ${p.warranty_months} tháng` : '',\n        p.support ? `Hỗ trợ: ${p.support}` : '',\n        `Mô tả: ${p.description}`,\n        features ? `Tính năng/Phạm vi:\\n${features}` : '',\n        techList,\n        p.process ? `Quy trình: ${p.process}` : '',\n        p.duration ? `Thời gian: ${p.duration}` : '',\n        Array.isArray(p.tags) && p.tags.length ? `Từ khóa: ${p.tags.join(', ')}` : ''\n      ].filter(Boolean).join('\\n'),\n      doc_type: 'product',\n      ref_id: p.id,\n      title: p.name,\n      category: p.category\n    }\n  });\n}\n\n// --- Quy trình nội bộ ---\nfor (const pr of processes) {\n  const steps = Array.isArray(pr.steps) ? pr.steps.join('\\n') : '';\n  docs.push({\n    json: {\n      text: [\n        `QUY TRÌNH: ${pr.name} (mã ${pr.id})`,\n        `Phòng ban: ${pr.department}`,\n        steps ? `Các bước:\\n${steps}` : '',\n        pr.sla ? `SLA: ${pr.sla}` : '',\n        pr.discount_policy ? `Chính sách giảm giá: ${pr.discount_policy}` : '',\n        pr.note ? `Lưu ý: ${pr.note}` : '',\n        pr.contact ? `Liên hệ: ${pr.contact}` : ''\n      ].filter(Boolean).join('\\n'),\n      doc_type: 'process',\n      ref_id: pr.id,\n      title: pr.name,\n      category: pr.department\n    }\n  });\n}\n\n// --- Chính sách ---\nconst policyLabels = {\n  work_from_home: 'Chính sách Làm việc từ xa (WFH)',\n  overtime: 'Chính sách Làm thêm giờ (OT)',\n  equipment: 'Chính sách Trang thiết bị',\n  confidentiality: 'Chính sách Bảo mật thông tin',\n  training: 'Chính sách Đào tạo',\n  code_of_conduct: 'Quy tắc Ứng xử'\n};\nfor (const [key, value] of Object.entries(policies)) {\n  const label = policyLabels[key] || key;\n  docs.push({\n    json: {\n      text: `CHÍNH SÁCH — ${label}:\\n${value}`,\n      doc_type: 'policy',\n      ref_id: `policy-${key}`,\n      title: label,\n      category: 'Chính sách'\n    }\n  });\n}\n\n// --- FAQ ---\nfaqs.forEach((f, i) => {\n  docs.push({\n    json: {\n      text: `CÂU HỎI THƯỜNG GẶP:\\nHỏi: ${f.q}\\nĐáp: ${f.a}`,\n      doc_type: 'faq',\n      ref_id: `faq-${i + 1}`,\n      title: f.q,\n      category: 'FAQ'\n    }\n  });\n});\n\nif (!docs.length) {\n  throw new Error('Không có document nào được tạo. Kiểm tra lại nội dung company_knowledge.json.');\n}\n\nconsole.log(`Đã tạo ${docs.length} documents từ company_knowledge.json`);\nreturn docs;"
+      },
+      "id": "wf17-node-004",
+      "name": "🧩 Tạo Documents Từ Knowledge JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 360],
+      "notes": "Chuyển từng mục (công ty, sản phẩm, quy trình, chính sách, FAQ) thành document có `text` (nội dung để embedding) và metadata (doc_type, ref_id, title, category) để AI có thể trích nguồn khi trả lời."
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "pineconeIndex": {
+          "__rl": true,
+          "mode": "id",
+          "value": "company-kb"
+        },
+        "embeddingBatchSize": 100,
+        "options": {
+          "pineconeNamespace": "company"
+        }
+      },
+      "id": "wf17-node-005",
+      "name": "🗄️ Pinecone: Nạp Documents (Insert)",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [900, 360],
+      "credentials": {
+        "pineconeApi": {
+          "id": "NHAP_PINECONE_CREDENTIAL_ID",
+          "name": "Pinecone account"
+        }
+      },
+      "notes": "Nạp documents vào Pinecone index 'company-kb', namespace 'company'.\nQUAN TRỌNG: Index phải được tạo trước trong Pinecone console với:\n  - Dimensions: 768 (Gemini text-embedding-004)\n  - Metric: cosine\nNamespace 'company' giúp phân tách dữ liệu nếu dùng chung index với hệ thống khác."
+      },
+    {
+      "parameters": {
+        "dataType": "json",
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $json.text }}",
+        "textSplittingMode": "custom",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "doc_type",
+                "value": "={{ $json.doc_type }}"
+              },
+              {
+                "name": "ref_id",
+                "value": "={{ $json.ref_id }}"
+              },
+              {
+                "name": "title",
+                "value": "={{ $json.title }}"
+              },
+              {
+                "name": "category",
+                "value": "={{ $json.category }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "wf17-node-006",
+      "name": "📚 Default Data Loader",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [900, 580],
+      "notes": "Lấy field `text` làm nội dung document và gắn metadata (doc_type, ref_id, title, category). textSplittingMode=custom để dùng Text Splitter bên dưới."
+    },
+    {
+      "parameters": {
+        "chunkSize": 800,
+        "chunkOverlap": 100,
+        "options": {}
+      },
+      "id": "wf17-node-007",
+      "name": "✂️ Recursive Text Splitter",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [900, 780],
+      "notes": "Chia document dài thành đoạn ~800 ký tự, chồng lấn 100 ký tự để giữ ngữ cảnh. Mỗi entry của chúng ta thường ngắn (< 800 ký tự) nên hầu hết nằm gọn trong 1 chunk."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-embedding-001",
+        "options": {}
+      },
+      "id": "wf17-node-008",
+      "name": "🔢 Gemini Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [1140, 580],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "NHAP_GEMINI_CREDENTIAL_ID",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      },
+      "notes": "Tạo vector 768 chiều cho mỗi document bằng Gemini gemini-embedding-001.\nCRITICAL: Workflow chatbot (02-chatbot.json) PHẢI dùng CÙNG model này. Sai model → vector không khớp → RAG không tìm được kết quả mà không báo lỗi."
+    }
+  ],
+  "connections": {
+    "📁 Form Upload company_knowledge.json": {
+      "main": [
+        [
+          {
+            "node": "🧷 Parse JSON Từ File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧷 Parse JSON Từ File": {
+      "main": [
+        [
+          {
+            "node": "🧩 Tạo Documents Từ Knowledge JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧩 Tạo Documents Từ Knowledge JSON": {
+      "main": [
+        [
+          {
+            "node": "🗄️ Pinecone: Nạp Documents (Insert)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📚 Default Data Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "🗄️ Pinecone: Nạp Documents (Insert)",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✂️ Recursive Text Splitter": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "📚 Default Data Loader",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔢 Gemini Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "🗄️ Pinecone: Nạp Documents (Insert)",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "executionTimeout": 300
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "Ingestion workflow: Form Upload file company_knowledge.json → Parse JSON → tạo documents → chia nhỏ → Gemini embedding → nạp vào Pinecone (index=company-kb, namespace=company). Không cần docker cp."
+  },
+  "id": "wf-17-rag-ingest-company",
+  "tags": [
+    { "name": "enterprise" },
+    { "name": "rag" },
+    { "name": "pinecone" },
+    { "name": "gemini" },
+    { "name": "community" }
+  ]
+}

@@ -1,0 +1,214 @@
+{
+  "company": {
+    "name": "TechViet Solutions",
+    "tagline": "Giải pháp công nghệ thông minh cho doanh nghiệp Việt",
+    "hotline": "1800 9999",
+    "email": "support@techviet.vn",
+    "website": "https://techviet.vn",
+    "address": "Tầng 15, Tòa nhà Innovation, 123 Nguyễn Văn Linh, Q.7, TP.HCM",
+    "working_hours": "Thứ 2 – Thứ 6: 08:00 – 17:30 | Thứ 7: 08:00 – 12:00",
+    "founded": "2015",
+    "employees": "150+",
+    "description": "TechViet Solutions là công ty công nghệ thông tin hàng đầu tại Việt Nam, chuyên cung cấp phần mềm quản lý doanh nghiệp, giải pháp chuyển đổi số và dịch vụ tư vấn CNTT. Chúng tôi phục vụ hơn 500 khách hàng doanh nghiệp vừa và lớn trên toàn quốc."
+  },
+  "products": [
+    {
+      "id": "SW001",
+      "name": "TechViet ERP",
+      "category": "Phần mềm Quản lý Doanh nghiệp",
+      "price": 15000000,
+      "price_unit": "VND/năm",
+      "description": "Hệ thống ERP tích hợp toàn diện dành cho doanh nghiệp vừa và lớn. Quản lý kế toán, kho hàng, bán hàng, nhân sự và sản xuất trên một nền tảng duy nhất.",
+      "features": [
+        "Quản lý kế toán và tài chính",
+        "Quản lý kho hàng và mua sắm",
+        "Quản lý bán hàng và CRM",
+        "Quản lý nhân sự và chấm công",
+        "Báo cáo thống kê thời gian thực",
+        "Tích hợp hóa đơn điện tử"
+      ],
+      "warranty_months": 12,
+      "support": "Hỗ trợ 24/7 qua hotline và email",
+      "in_stock": true,
+      "tags": ["erp", "kế toán", "kho hàng", "nhân sự", "doanh nghiệp"]
+    },
+    {
+      "id": "SW002",
+      "name": "TechViet HRM",
+      "category": "Phần mềm Quản lý Nhân sự",
+      "price": 5000000,
+      "price_unit": "VND/năm",
+      "description": "Giải pháp quản lý nhân sự toàn diện: tuyển dụng, onboarding, chấm công, tính lương, đánh giá KPI và phát triển nhân tài.",
+      "features": [
+        "Quản lý hồ sơ nhân viên",
+        "Chấm công bằng QR/App",
+        "Tính lương tự động",
+        "Quản lý nghỉ phép và OT",
+        "Đánh giá hiệu suất KPI",
+        "Tích hợp bảo hiểm xã hội"
+      ],
+      "warranty_months": 12,
+      "support": "Hỗ trợ trong giờ hành chính, SLA 4 giờ",
+      "in_stock": true,
+      "tags": ["hrm", "nhân sự", "lương", "kpi", "chấm công"]
+    },
+    {
+      "id": "SW003",
+      "name": "TechViet CRM",
+      "category": "Phần mềm Quản lý Khách hàng",
+      "price": 4000000,
+      "price_unit": "VND/năm",
+      "description": "Hệ thống CRM giúp doanh nghiệp quản lý toàn bộ vòng đời khách hàng: từ lead, deal, hợp đồng đến chăm sóc hậu mãi.",
+      "features": [
+        "Quản lý khách hàng tiềm năng (Lead)",
+        "Pipeline bán hàng trực quan",
+        "Lịch sử tương tác khách hàng",
+        "Email marketing tích hợp",
+        "Báo cáo doanh thu và dự báo",
+        "App mobile cho sales team"
+      ],
+      "warranty_months": 12,
+      "support": "Hỗ trợ trong giờ hành chính, SLA 4 giờ",
+      "in_stock": true,
+      "tags": ["crm", "khách hàng", "bán hàng", "marketing", "sales"]
+    },
+    {
+      "id": "SV001",
+      "name": "Dịch vụ Tư vấn Chuyển đổi Số",
+      "category": "Dịch vụ Tư vấn",
+      "price": 50000000,
+      "price_unit": "VND/dự án",
+      "description": "Dịch vụ tư vấn chiến lược chuyển đổi số toàn diện: đánh giá hiện trạng, lập lộ trình, triển khai và đào tạo.",
+      "scope": [
+        "Đánh giá maturity level chuyển đổi số",
+        "Thiết kế kiến trúc hệ thống CNTT",
+        "Tư vấn lựa chọn và triển khai giải pháp",
+        "Đào tạo nhân sự vận hành",
+        "Hỗ trợ sau triển khai 3 tháng"
+      ],
+      "duration": "3-6 tháng tùy quy mô doanh nghiệp",
+      "in_stock": true,
+      "tags": ["tư vấn", "chuyển đổi số", "digital transformation"]
+    },
+    {
+      "id": "SV002",
+      "name": "Dịch vụ Phát triển Phần mềm theo Yêu cầu",
+      "category": "Dịch vụ Phát triển",
+      "price": 0,
+      "price_unit": "Báo giá theo yêu cầu",
+      "description": "Phát triển phần mềm, ứng dụng web và mobile theo yêu cầu đặc thù của doanh nghiệp với quy trình Agile.",
+      "technologies": ["React/Next.js", "Node.js", "Python", "Java Spring Boot", ".NET", "Flutter", "React Native", "AWS/GCP/Azure"],
+      "process": "Phân tích yêu cầu → Thiết kế → Sprint 2 tuần → Demo & phản hồi → Bàn giao → Bảo trì",
+      "in_stock": true,
+      "tags": ["custom software", "web app", "mobile app", "outsourcing"]
+    }
+  ],
+  "processes": [
+    {
+      "id": "HR001",
+      "name": "Quy trình Tuyển dụng",
+      "department": "Nhân sự (HR)",
+      "steps": [
+        "1. Trưởng bộ phận gửi JD (Job Description) và đề xuất tuyển dụng lên HR qua email nội bộ.",
+        "2. HR đăng tuyển trên website công ty và các kênh tuyển dụng (LinkedIn, TopCV, ITviec) trong vòng 2 ngày làm việc.",
+        "3. HR sàng lọc CV trong 5 ngày làm việc kể từ khi hết hạn nộp hồ sơ.",
+        "4. Phỏng vấn vòng 1: HR phỏng vấn online (30 phút) để kiểm tra thái độ và kỹ năng mềm.",
+        "5. Phỏng vấn vòng 2: Trưởng bộ phận phỏng vấn trực tiếp hoặc qua Zoom (60 phút), có thể có bài test kỹ thuật.",
+        "6. Phỏng vấn vòng 3 (nếu cần): Ban Giám đốc phỏng vấn cho vị trí cấp Trưởng phòng trở lên.",
+        "7. HR thông báo kết quả trong 3 ngày làm việc sau phỏng vấn cuối.",
+        "8. Gửi offer letter và thu thập hồ sơ nhân viên mới.",
+        "9. Onboarding theo chương trình 30 ngày đầu."
+      ],
+      "sla": "Tổng thời gian tuyển dụng không quá 30 ngày làm việc",
+      "contact": "hr@techviet.vn"
+    },
+    {
+      "id": "HR002",
+      "name": "Quy trình Xin Nghỉ Phép",
+      "department": "Nhân sự (HR)",
+      "steps": [
+        "1. Nhân viên đăng nhập hệ thống TechViet HRM, chọn 'Yêu cầu nghỉ phép'.",
+        "2. Điền thông tin: ngày nghỉ, loại phép (phép năm / không lương / bệnh), lý do.",
+        "3. Hệ thống tự động gửi thông báo đến Quản lý trực tiếp.",
+        "4. Quản lý trực tiếp duyệt hoặc từ chối trong vòng 1 ngày làm việc.",
+        "5. Nhân viên nhận thông báo kết quả qua email và app.",
+        "6. Nghỉ khẩn cấp: nhắn tin trực tiếp cho quản lý và update HRM sau."
+      ],
+      "note": "Phép năm: 12 ngày/năm cho nhân viên chính thức. Thử việc không có phép năm.",
+      "contact": "hr@techviet.vn"
+    },
+    {
+      "id": "SALE001",
+      "name": "Quy trình Bán hàng và Ký Hợp đồng",
+      "department": "Kinh doanh",
+      "steps": [
+        "1. Sales tạo Lead mới trong TechViet CRM với đầy đủ thông tin khách hàng.",
+        "2. Gửi email giới thiệu và tài liệu sản phẩm trong 24 giờ sau khi có Lead.",
+        "3. Hẹn demo sản phẩm (online hoặc tại văn phòng khách).",
+        "4. Gửi báo giá (Quotation) qua email, có dấu và chữ ký của Trưởng phòng Kinh doanh.",
+        "5. Thương lượng và điều chỉnh (nếu cần), mọi giảm giá trên 20% phải có BGĐ duyệt.",
+        "6. Khách hàng xác nhận → Sales tạo hợp đồng template, gửi bộ phận pháp lý kiểm tra.",
+        "7. Ký hợp đồng: điện tử (eSign) hoặc bản cứng.",
+        "8. Sales update CRM: chuyển Deal sang 'Won', tạo PO và chuyển sang bộ phận triển khai."
+      ],
+      "discount_policy": "Giảm tối đa 10% cho Trưởng phòng KD. Trên 10%-20% cần Giám đốc KD duyệt. Trên 20% cần BGĐ.",
+      "contact": "sales@techviet.vn"
+    },
+    {
+      "id": "IT001",
+      "name": "Quy trình Yêu cầu Hỗ trợ IT",
+      "department": "IT Support",
+      "steps": [
+        "1. Nhân viên tạo ticket tại https://helpdesk.techviet.vn hoặc gọi ext. 100.",
+        "2. Ticket được tự động phân loại và gán cho kỹ thuật viên phụ trách.",
+        "3. P1 (Sự cố nghiêm trọng): phản hồi trong 30 phút, giải quyết trong 4 giờ.",
+        "4. P2 (Ảnh hưởng nhiều người): phản hồi trong 2 giờ, giải quyết trong 1 ngày làm việc.",
+        "5. P3 (Yêu cầu thông thường): phản hồi trong 4 giờ, giải quyết trong 3 ngày làm việc.",
+        "6. Nhân viên xác nhận đã giải quyết xong và đóng ticket."
+      ],
+      "contact": "it-support@techviet.vn | ext. 100"
+    }
+  ],
+  "policies": {
+    "work_from_home": "Nhân viên được làm việc từ xa (WFH) tối đa 2 ngày/tuần sau khi thử việc xong. Phải thông báo cho quản lý trước 17:00 ngày hôm trước. Các cuộc họp với khách hàng bắt buộc có mặt trực tiếp hoặc bật camera khi online.",
+    "overtime": "Làm thêm giờ được tính 150% lương giờ (ngày thường), 200% (cuối tuần), 300% (ngày lễ). Phải được Quản lý duyệt trước. Đề xuất OT gửi qua HRM tối thiểu 1 ngày trước.",
+    "equipment": "Công ty cấp laptop cho tất cả nhân viên chính thức. Laptop cấp theo vị trí: Developer nhận MacBook Pro M3 hoặc ThinkPad X1 Carbon. Designer nhận MacBook Pro M3. Sales/Admin nhận laptop Windows phổ thông. Nhân viên chịu trách nhiệm bảo quản, mất/hỏng do sơ ý phải đền bù theo giá trị khấu hao.",
+    "confidentiality": "Mọi thông tin khách hàng, mã nguồn, dữ liệu kinh doanh đều là tài sản bí mật của công ty. Không được chia sẻ ra ngoài không qua phê duyệt. Vi phạm có thể dẫn đến chấm dứt hợp đồng và xử lý pháp lý.",
+    "training": "Công ty hỗ trợ 100% học phí cho các khóa đào tạo liên quan đến công việc (tối đa 10 triệu VND/người/năm). Nhân viên cam kết làm việc tối thiểu 1 năm sau khi hoàn thành khóa học do công ty tài trợ.",
+    "code_of_conduct": "Tất cả nhân viên phải tuân thủ Bộ quy tắc ứng xử của công ty: tôn trọng đồng nghiệp, không phân biệt đối xử, không quấy rối, không sử dụng tài nguyên công ty cho mục đích cá nhân."
+  },
+  "faq": [
+    {
+      "q": "Làm thế nào để đặt lịch demo sản phẩm TechViet ERP?",
+      "a": "Liên hệ team Kinh doanh qua email sales@techviet.vn hoặc gọi hotline 1800 9999. Bạn cũng có thể điền form trên website https://techviet.vn/demo để được tư vấn miễn phí."
+    },
+    {
+      "q": "Chi phí triển khai TechViet ERP là bao nhiêu?",
+      "a": "Giá phần mềm TechViet ERP là 15.000.000 VND/năm. Chi phí triển khai (cài đặt, tùy chỉnh, đào tạo) từ 20-50 triệu VND tùy quy mô doanh nghiệp. Vui lòng liên hệ sales@techviet.vn để nhận báo giá chi tiết."
+    },
+    {
+      "q": "TechViet có hỗ trợ tích hợp với phần mềm kế toán MISA không?",
+      "a": "Có, TechViet ERP có module tích hợp với MISA SME và MISA AMIS. Chi phí tích hợp phụ thuộc vào phiên bản MISA bạn đang dùng. Liên hệ support@techviet.vn để được tư vấn."
+    },
+    {
+      "q": "Nhân viên mới cần chuẩn bị gì trước ngày đầu làm việc?",
+      "a": "HR sẽ gửi email checklist onboarding. Bạn cần: 1) Ký hợp đồng lao động, 2) Nộp bản sao CCCD/CMND, bằng cấp, ảnh thẻ, 3) Cung cấp số tài khoản ngân hàng để nhận lương, 4) Tải app TechViet HRM để chấm công từ ngày đầu."
+    },
+    {
+      "q": "Chính sách nghỉ phép hàng năm như thế nào?",
+      "a": "Nhân viên chính thức được 12 ngày phép/năm (có thể tích lũy tối đa 5 ngày sang năm sau). Thêm 1 ngày/năm làm việc sau 3 năm, tối đa 18 ngày. Phép bệnh có xác nhận bác sĩ không trừ phép năm (tối đa 5 ngày/năm)."
+    },
+    {
+      "q": "Lương được thanh toán vào ngày nào?",
+      "a": "Lương được chuyển khoản vào ngày 5 của tháng tiếp theo (nếu ngày 5 là ngày nghỉ thì ngày làm việc trước đó). Lương tháng 13 và thưởng Tết được phát trước ngày 20 tháng Chạp."
+    },
+    {
+      "q": "Công ty có cho phép làm thêm dự án freelance bên ngoài không?",
+      "a": "Nhân viên được phép làm freelance với điều kiện: không xung đột lợi ích với công ty, không dùng tài nguyên/thời gian công ty, không làm cho đối thủ cạnh tranh trực tiếp. Cần thông báo bằng văn bản cho HR và được Trưởng bộ phận chấp thuận."
+    },
+    {
+      "q": "Quy trình báo cáo sự cố bảo mật thông tin như thế nào?",
+      "a": "Phát hiện sự cố bảo mật (rò rỉ dữ liệu, tấn công mạng, mất thiết bị chứa thông tin quan trọng) → Báo ngay cho IT Support (ext. 100) và Quản lý trực tiếp → IT sẽ kích hoạt quy trình ứng phó sự cố trong vòng 1 giờ."
+    }
+  ]
+}
