@@ -46,6 +46,12 @@ services:
       - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE:-false}
       - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-}
+      # MCP Tool node requirement (n8n >= v1.88)
+      - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+      # Custom env vars used by workflows
+      - MCP_SERVER_URL=${MCP_SERVER_URL:-http://host.docker.internal:3001/sse}
+      - MESSENGER_PAGE_ACCESS_TOKEN=${MESSENGER_PAGE_ACCESS_TOKEN:-}
+      - MESSENGER_VERIFY_TOKEN=${MESSENGER_VERIFY_TOKEN:-}
     volumes:
       - n8n_data:/home/node/.n8n
     depends_on:
