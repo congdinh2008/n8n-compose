@@ -1,0 +1,664 @@
+{
+  "name": "18 · Enterprise: Invoice OCR Vision v2 (Analytics-ready)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "event": "fileCreated",
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "NHAP_GOOGLE_DRIVE_FOLDER_ID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "google-drive-new-invoice-trigger",
+      "name": "Google Drive Trigger: Ảnh Hóa Đơn Mới",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        160,
+        320
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "NHAP_GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      },
+      "notes": "Theo dõi folder Google Drive nhận ảnh hóa đơn mới. User chỉ cần upload ảnh/PDF vào folder này."
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-gemini-model",
+              "name": "gemini_model",
+              "type": "string",
+              "value": "gemini-2.5-flash"
+            },
+            {
+              "id": "cfg-sheet-id",
+              "name": "google_sheet_id",
+              "type": "string",
+              "value": "NHAP_GOOGLE_SHEET_ID"
+            },
+            {
+              "id": "cfg-sheet-name",
+              "name": "google_sheet_name",
+              "type": "string",
+              "value": "Invoice OCR"
+            },
+            {
+              "id": "cfg-threshold",
+              "name": "high_value_threshold",
+              "type": "number",
+              "value": 10000000
+            },
+            {
+              "id": "cfg-telegram-chat",
+              "name": "telegram_chat_id",
+              "type": "string",
+              "value": "NHAP_TELEGRAM_CHAT_ID"
+            },
+            {
+              "id": "cfg-usd-vnd",
+              "name": "usd_to_vnd",
+              "type": "number",
+              "value": 25000
+            },
+            {
+              "id": "cfg-anom-txn",
+              "name": "anomaly_txn_threshold",
+              "type": "number",
+              "value": 30000000
+            },
+            {
+              "id": "cfg-anom-sheet",
+              "name": "anomalies_sheet_name",
+              "type": "string",
+              "value": "Anomalies"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "config-set-vars",
+      "name": "Cấu Hình",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        380,
+        320
+      ],
+      "notes": "Cấu hình tập trung: model Gemini, Google Sheet ID + sheet name, ngưỡng cảnh báo, Telegram chat ID. Chỉ sửa các giá trị ở node này. (Drive folder ID nằm ở node Trigger vì trigger chạy trước mọi node khác.)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const files = $input.all();\nconst allowed = new Set([\n  'image/jpeg',\n  'image/jpg',\n  'image/png',\n  'image/webp',\n  'image/heic',\n  'image/heif',\n  'application/pdf'\n]);\n\nreturn files\n  .filter(item => {\n    const mime = String(item.json.mimeType || '').toLowerCase();\n    const name = String(item.json.name || '').toLowerCase();\n    return allowed.has(mime) || /\\.(jpg|jpeg|png|webp|heic|heif|pdf)$/i.test(name);\n  })\n  .map(item => ({\n    json: {\n      file_id: item.json.id,\n      file_name: item.json.name || 'unknown-file',\n      mime_type: item.json.mimeType || 'application/octet-stream',\n      created_time: item.json.createdTime || '',\n      modified_time: item.json.modifiedTime || '',\n      web_view_link: item.json.webViewLink || `https://drive.google.com/file/d/${item.json.id}/view`,\n      processed_at: new Date().toISOString()\n    }\n  }));"
+      },
+      "id": "filter-image-files",
+      "name": "Lọc File Ảnh/PDF Hóa Đơn",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        320
+      ],
+      "notes": "Bỏ qua file không phải ảnh/PDF. Nếu không có file hợp lệ thì workflow dừng ở đây."
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.google_sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.google_sheet_name }}",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-processed-ids",
+      "name": "Google Sheets: Đọc File Đã Xử Lý",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        900,
+        320
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NHAP_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Đọc toàn bộ sheet 1 lần (executeOnce) để lấy danh sách File ID đã xử lý, phục vụ chống trùng. Sheet trống/chỉ có header -> trả [] -> coi mọi file là mới.",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const processed = $('Google Sheets: Đọc File Đã Xử Lý').all();\nconst processedIds = new Set(\n  processed\n    .map(r => String((r.json && r.json['File ID']) ?? '').trim())\n    .filter(Boolean)\n);\n\nconst files = $('Lọc File Ảnh/PDF Hóa Đơn').all();\nconst newFiles = files.filter(f => {\n  const id = String(f.json.file_id ?? '').trim();\n  return id && !processedIds.has(id);\n});\n\n// Chỉ chuyển tiếp file CHƯA có trong sheet (theo cột File ID).\n// Nếu tất cả đã xử lý -> trả mảng rỗng -> workflow dừng tại đây.\nreturn newFiles.map(f => ({ json: f.json }));"
+      },
+      "id": "filter-unprocessed-files",
+      "name": "Lọc File Chưa Xử Lý",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        320
+      ],
+      "notes": "Bỏ các file đã có File ID trong sheet. Dedup theo Drive File ID -> cùng một file sẽ không bị OCR lại khi re-run/polling lại."
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.file_id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "download-invoice-file",
+      "name": "Google Drive: Tải File Hóa Đơn",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1420,
+        320
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "NHAP_GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      },
+      "notes": "Tải file mới về dạng binary để gửi sang Gemini Vision."
+    },
+    {
+      "parameters": {
+        "jsCode": "const sources = $('Lọc File Chưa Xử Lý').all();\nconst items = $input.all();\n\nconst prompt = `Bạn là hệ thống OCR Vision cho phòng kế toán doanh nghiệp Việt Nam.\nNhiệm vụ: đọc ảnh/PDF hóa đơn, biên nhận, phiếu thu, phiếu chi, hóa đơn VAT, hóa đơn bán lẻ hoặc hóa đơn dịch vụ.\n\nChỉ trả về JSON hợp lệ, không markdown, không giải thích. Nếu trường nào không nhìn thấy rõ thì trả chuỗi rỗng hoặc null, không bịa dữ liệu.\n\nSchema bắt buộc:\n{\n  \"document_type\": \"invoice|receipt|bill|payment_slip|other\",\n  \"invoice_number\": \"\",\n  \"invoice_date\": \"YYYY-MM-DD hoặc chuỗi gốc nếu không chắc\",\n  \"seller_name\": \"\",\n  \"seller_tax_id\": \"\",\n  \"seller_address\": \"\",\n  \"buyer_name\": \"\",\n  \"buyer_tax_id\": \"\",\n  \"currency\": \"VND|USD|...\",\n  \"subtotal\": 0,\n  \"vat_amount\": 0,\n  \"discount_amount\": 0,\n  \"total_amount\": 0,\n  \"payment_method\": \"cash|bank_transfer|card|e_wallet|unknown\",\n  \"line_items\": [\n    {\n      \"description\": \"\",\n      \"quantity\": 0,\n      \"unit_price\": 0,\n      \"amount\": 0\n    }\n  ],\n  \"confidence\": 0,\n  \"summary_vi\": \"Tóm tắt ngắn bằng tiếng Việt\",\n  \"needs_manual_review\": false,\n  \"manual_review_reason\": \"\"\n}\n\nQuy tắc:\n- Chuẩn hóa số tiền về number, bỏ dấu chấm/phẩy phân tách nghìn.\n- Nếu tổng tiền có nhiều dòng, ưu tiên dòng Tổng cộng/Thanh toán/Total.\n- confidence từ 0 đến 1 dựa trên độ rõ của ảnh và độ chắc chắn khi đọc.\n- needs_manual_review=true nếu ảnh mờ, thiếu tổng tiền, thiếu nhà cung cấp, hoặc confidence < 0.75.`;\n\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const source = sources[i]?.json || {};\n  const binary = items[i].binary?.data;\n\n  if (!binary) {\n    throw new Error(`Không có binary cho file ${source.file_name || '(không rõ)'} (item ${i}). Kiểm tra quyền Google Drive hoặc loại file.`);\n  }\n\n  // n8n khuyến nghị dùng helper này thay vì đọc trực tiếp binary.data.data,\n  // vì Community/self-hosted có thể lưu binary trên filesystem hoặc external storage.\n  const buffer = await this.helpers.getBinaryDataBuffer(i, 'data');\n  if (!buffer?.length) {\n    throw new Error(`Không đọc được binary buffer cho file ${source.file_name || '(không rõ)'} (item ${i}).`);\n  }\n\n  const mimeType = binary.mimeType || source.mime_type || 'image/jpeg';\n  const base64Data = buffer.toString('base64');\n\n  out.push({\n    json: {\n      ...source,\n      binary_mime_type: mimeType,\n      gemini_model: String($('Cấu Hình').first().json.gemini_model || 'gemini-2.5-flash'),\n      high_value_threshold: Number($('Cấu Hình').first().json.high_value_threshold || 10000000),\n      gemini_request: {\n        contents: [\n          {\n            role: 'user',\n            parts: [\n              { text: prompt },\n              {\n                inlineData: {\n                  mimeType,\n                  data: base64Data\n                }\n              }\n            ]\n          }\n        ],\n        generationConfig: {\n          temperature: 0.1,\n          maxOutputTokens: 8192,\n          responseMimeType: 'application/json'\n        }\n      }\n    },\n    pairedItem: { item: i }\n  });\n}\n\nreturn out;"
+      },
+      "id": "build-gemini-vision-request",
+      "name": "Tạo Gemini Vision OCR Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        320
+      ],
+      "notes": "Đóng gói file binary thành inlineData base64 và tạo prompt OCR schema JSON."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $json.gemini_model }}:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.gemini_request }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "gemini-vision-ocr",
+      "name": "Gemini Vision: OCR Hóa Đơn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1940,
+        320
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "NHAP_GEMINI_CREDENTIAL_ID",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      },
+      "notes": "Gọi Gemini generateContent với image/PDF inlineData. Credential: Google Gemini(PaLM) API key.",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseJson(text) {\n  const clean = String(text)\n    .replace(/^```json\\s*/i, '')\n    .replace(/^```\\s*/i, '')\n    .replace(/```$/i, '')\n    .trim();\n  return JSON.parse(clean);\n}\n\nfunction toNumber(value) {\n  if (value === null || value === undefined || value === '') return 0;\n  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;\n  const normalized = String(value).replace(/[^0-9,.-]/g, '').replace(/[,.](?=\\d{3}(\\D|$))/g, '').replace(',', '.');\n  const parsed = Number(normalized);\n  return Number.isFinite(parsed) ? parsed : 0;\n}\n\nfunction arr(value) { return Array.isArray(value) ? value : []; }\n\nfunction esc(value) {\n  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n}\n\nfunction toIsoDate(value) {\n  const s = String(value || '').trim();\n  return /^\\d{4}-\\d{2}-\\d{2}$/.test(s) ? s : '';\n}\n\nfunction bucketConfidence(c) {\n  if (c < 0.5) return '1. <0.5';\n  if (c < 0.75) return '2. 0.5-0.75';\n  if (c < 0.9) return '3. 0.75-0.9';\n  return '4. >=0.9';\n}\n\nfunction ymOf(d) { return d.slice(0, 7); }\nfunction quarterOf(d) { return `${d.slice(0,4)}-Q${Math.ceil(Number(d.slice(5,7)) / 3)}`; }\n\nconst cfg = $('Cấu Hình').first().json;\nconst usdToVnd = Number(cfg.usd_to_vnd) || 25000;\n\nfunction toVnd(amount, cur) {\n  const c = String(cur || 'VND').toUpperCase();\n  if (c === 'VND' || c === '') return amount;\n  if (c === 'USD') return Math.round(amount * usdToVnd);\n  return ''; // tiền tệ khác: cần tỉ giá riêng -> để trống để không poison tổng VND\n}\n\nfunction blankRow(source, extra) {\n  const today = new Date().toISOString().slice(0, 10);\n  const base = {\n    'Processed At': new Date().toISOString(),\n    'File Name': source.file_name || '',\n    'File ID': source.file_id || '',\n    'File Link': source.web_view_link || '',\n    'Document Type': '',\n    'Invoice Number': '',\n    'Invoice Date': '',\n    'Invoice Date ISO': '',\n    'Year Month': ymOf(today),\n    'Quarter': quarterOf(today),\n    'Seller Name': '',\n    'Vendor Canonical': '',\n    'Seller Tax ID': '',\n    'Seller Address': '',\n    'Buyer Name': '',\n    'Buyer Tax ID': '',\n    'Currency': '',\n    'Subtotal': 0,\n    'VAT Amount': 0,\n    'Discount Amount': 0,\n    'Total Amount': 0,\n    'Total Amount VND': '',\n    'Payment Method': '',\n    'Line Items JSON': '[]',\n    'Confidence': 0,\n    'Confidence Bucket': '1. <0.5',\n    'Needs Manual Review': true,\n    'Manual Review Reason': '',\n    'High Value': false,\n    'Status': 'ocr_failed',\n    'Summary': '',\n    'Gemini Model': source.gemini_model || '',\n    'Raw OCR JSON': ''\n  };\n  return Object.assign(base, extra || {});\n}\n\nconst responses = $input.all();\nconst sources = $('Tạo Gemini Vision OCR Request').all();\n\nreturn responses.map((respItem, i) => {\n  const source = sources[i]?.json || {};\n\n  try {\n    const response = respItem.json;\n    if (response && response.error) {\n      throw new Error(`Gemini trả lỗi: ${JSON.stringify(response.error).slice(0, 300)}`);\n    }\n    const rawText = response?.candidates?.[0]?.content?.parts?.[0]?.text || '';\n    if (!rawText) {\n      throw new Error(`Gemini không trả text. Raw response: ${JSON.stringify(response).slice(0, 300)}`);\n    }\n\n    let ocr;\n    try { ocr = parseJson(rawText); }\n    catch (parseError) { throw new Error(`Không parse được JSON OCR: ${parseError.message}. Text: ${rawText.slice(0, 400)}`); }\n\n    const totalAmount = toNumber(ocr.total_amount);\n    const subtotal = toNumber(ocr.subtotal);\n    const vatAmount = toNumber(ocr.vat_amount);\n    const discountAmount = toNumber(ocr.discount_amount);\n    const threshold = toNumber(source.high_value_threshold) || 10000000;\n    const confidence = Math.max(0, Math.min(1, Number(ocr.confidence) || 0));\n    const isHighValue = totalAmount > threshold;\n    const needsManualReview = Boolean(ocr.needs_manual_review) || confidence < 0.75 || !totalAmount || !ocr.seller_name;\n\n    const lineItems = arr(ocr.line_items).map(it => ({\n      description: String(it.description || ''),\n      quantity: toNumber(it.quantity),\n      unit_price: toNumber(it.unit_price),\n      amount: toNumber(it.amount)\n    }));\n\n    const currency = ocr.currency || 'VND';\n    const invoiceDateIso = toIsoDate(ocr.invoice_date);\n    const bucketBase = invoiceDateIso || new Date().toISOString().slice(0, 10);\n    const totalAmountVnd = toVnd(totalAmount, currency);\n    const vendorCanonical = String(ocr.seller_name || '').replace(/\\s+/g, ' ').trim();\n    const status = needsManualReview ? 'manual_review' : 'processed';\n\n    const anomalyTxnThreshold = Number(cfg.anomaly_txn_threshold) || 30000000;\n    const txnVnd = Number(totalAmountVnd) || 0;\n    const isTxnAnomaly = txnVnd > anomalyTxnThreshold;\n    const todayIso = new Date().toISOString().slice(0, 10);\n    const txnDeltaPct = anomalyTxnThreshold > 0 ? Math.round(((txnVnd - anomalyTxnThreshold) / anomalyTxnThreshold) * 100) : 0;\n    const anomalyRow = isTxnAnomaly ? {\n      'Date': todayIso,\n      'Period': ymOf(bucketBase),\n      'Metric': 'Giao dịch lớn',\n      'Value VND': txnVnd,\n      'Baseline VND': anomalyTxnThreshold,\n      'Delta %': txnDeltaPct,\n      'Severity': txnVnd >= anomalyTxnThreshold * 2 ? 'HIGH' : 'MEDIUM',\n      'Note': `Hóa đơn ${ocr.invoice_number || '(không số)'} từ ${vendorCanonical || '(không rõ)'} = ${txnVnd.toLocaleString('vi-VN')} VND vượt ngưỡng giao dịch lớn ${anomalyTxnThreshold.toLocaleString('vi-VN')} VND.`\n    } : null;\n\n    const row = {\n      'Processed At': new Date().toISOString(),\n      'File Name': source.file_name || '',\n      'File ID': source.file_id || '',\n      'File Link': source.web_view_link || '',\n      'Document Type': ocr.document_type || 'other',\n      'Invoice Number': ocr.invoice_number || '',\n      'Invoice Date': ocr.invoice_date || '',\n      'Invoice Date ISO': invoiceDateIso,\n      'Year Month': ymOf(bucketBase),\n      'Quarter': quarterOf(bucketBase),\n      'Seller Name': ocr.seller_name || '',\n      'Vendor Canonical': vendorCanonical,\n      'Seller Tax ID': ocr.seller_tax_id || '',\n      'Seller Address': ocr.seller_address || '',\n      'Buyer Name': ocr.buyer_name || '',\n      'Buyer Tax ID': ocr.buyer_tax_id || '',\n      'Currency': currency,\n      'Subtotal': subtotal,\n      'VAT Amount': vatAmount,\n      'Discount Amount': discountAmount,\n      'Total Amount': totalAmount,\n      'Total Amount VND': totalAmountVnd,\n      'Payment Method': ocr.payment_method || 'unknown',\n      'Line Items JSON': JSON.stringify(lineItems),\n      'Confidence': confidence,\n      'Confidence Bucket': bucketConfidence(confidence),\n      'Needs Manual Review': needsManualReview,\n      'Manual Review Reason': ocr.manual_review_reason || '',\n      'High Value': isHighValue,\n      'Status': status,\n      'Summary': ocr.summary_vi || '',\n      'Gemini Model': source.gemini_model || '',\n      'Raw OCR JSON': JSON.stringify(ocr)\n    };\n\n    const amountText = `${totalAmount.toLocaleString('vi-VN')} ${esc(currency)}`;\n    const statusIcon = needsManualReview ? '⚠️' : '✅';\n    const link = esc(source.web_view_link || '');\n\n    const doneMessage = `${statusIcon} <b>Đã OCR hóa đơn</b>\\n\\n<b>File:</b> ${esc(source.file_name || '(không rõ)')}\\n<b>Nhà cung cấp:</b> ${esc(ocr.seller_name || '(không rõ)')}\\n<b>Số hóa đơn:</b> ${esc(ocr.invoice_number || '(không rõ)')}\\n<b>Ngày:</b> ${esc(ocr.invoice_date || '(không rõ)')}\\n<b>Tổng tiền:</b> ${amountText}\\n<b>Confidence:</b> ${(confidence * 100).toFixed(0)}%\\n<b>Cần kiểm tra lại:</b> ${needsManualReview ? 'Có' : 'Không'}\\n\\n<a href=\"${link}\">Mở file trên Google Drive</a>`;\n\n    const alertMessage = `🚨 <b>CẢNH BÁO HÓA ĐƠN GIÁ TRỊ LỚN</b>\\n\\n<b>File:</b> ${esc(source.file_name || '(không rõ)')}\\n<b>Nhà cung cấp:</b> ${esc(ocr.seller_name || '(không rõ)')}\\n<b>Số hóa đơn:</b> ${esc(ocr.invoice_number || '(không rõ)')}\\n<b>Tổng tiền:</b> ${amountText}\\n<b>Ngưỡng cảnh báo:</b> ${threshold.toLocaleString('vi-VN')} VND\\n\\n<a href=\"${link}\">Mở file để duyệt</a>`;\n\n    return {\n      json: {\n        ...source,\n        ocr,\n        line_items: lineItems,\n        total_amount: totalAmount,\n        total_amount_vnd: totalAmountVnd,\n        confidence,\n        needs_manual_review: needsManualReview,\n        is_high_value: isHighValue,\n        status,\n        is_txn_anomaly: isTxnAnomaly,\n        anomaly_row: anomalyRow,\n        sheet_row: row,\n        telegram_done_message: doneMessage,\n        telegram_alert_message: alertMessage\n      },\n      pairedItem: { item: i }\n    };\n  } catch (error) {\n    const reason = `Lỗi OCR tự động: ${error.message}`.slice(0, 500);\n    const row = blankRow(source, { 'Manual Review Reason': reason });\n    const link = esc(source.web_view_link || '');\n    const doneMessage = `⚠️ <b>Không đọc được hóa đơn tự động</b>\\n\\n<b>File:</b> ${esc(source.file_name || '(không rõ)')}\\n<b>Lý do:</b> ${esc(reason)}\\n\\n<a href=\"${link}\">Mở file để kiểm tra thủ công</a>`;\n\n    return {\n      json: {\n        ...source,\n        ocr: null,\n        line_items: [],\n        total_amount: 0,\n        total_amount_vnd: '',\n        confidence: 0,\n        needs_manual_review: true,\n        is_high_value: false,\n        status: 'ocr_failed',\n        is_txn_anomaly: false,\n        anomaly_row: null,\n        ocr_failed: true,\n        sheet_row: row,\n        telegram_done_message: doneMessage,\n        telegram_alert_message: ''\n      },\n      pairedItem: { item: i }\n    };\n  }\n});"
+      },
+      "id": "parse-gemini-ocr-result",
+      "name": "Parse Gemini OCR Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        320
+      ],
+      "notes": "Parse JSON OCR, chuẩn hóa số tiền, xác định hóa đơn giá trị lớn và chuẩn bị row Google Sheets."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.google_sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.google_sheet_name }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Processed At": "={{ $json.sheet_row['Processed At'] }}",
+            "File Name": "={{ $json.sheet_row['File Name'] }}",
+            "File ID": "={{ $json.sheet_row['File ID'] }}",
+            "File Link": "={{ $json.sheet_row['File Link'] }}",
+            "Document Type": "={{ $json.sheet_row['Document Type'] }}",
+            "Invoice Number": "={{ $json.sheet_row['Invoice Number'] }}",
+            "Invoice Date": "={{ $json.sheet_row['Invoice Date'] }}",
+            "Invoice Date ISO": "={{ $json.sheet_row['Invoice Date ISO'] }}",
+            "Year Month": "={{ $json.sheet_row['Year Month'] }}",
+            "Quarter": "={{ $json.sheet_row['Quarter'] }}",
+            "Seller Name": "={{ $json.sheet_row['Seller Name'] }}",
+            "Vendor Canonical": "={{ $json.sheet_row['Vendor Canonical'] }}",
+            "Seller Tax ID": "={{ $json.sheet_row['Seller Tax ID'] }}",
+            "Seller Address": "={{ $json.sheet_row['Seller Address'] }}",
+            "Buyer Name": "={{ $json.sheet_row['Buyer Name'] }}",
+            "Buyer Tax ID": "={{ $json.sheet_row['Buyer Tax ID'] }}",
+            "Currency": "={{ $json.sheet_row['Currency'] }}",
+            "Subtotal": "={{ $json.sheet_row['Subtotal'] }}",
+            "VAT Amount": "={{ $json.sheet_row['VAT Amount'] }}",
+            "Discount Amount": "={{ $json.sheet_row['Discount Amount'] }}",
+            "Total Amount": "={{ $json.sheet_row['Total Amount'] }}",
+            "Total Amount VND": "={{ $json.sheet_row['Total Amount VND'] }}",
+            "Payment Method": "={{ $json.sheet_row['Payment Method'] }}",
+            "Line Items JSON": "={{ $json.sheet_row['Line Items JSON'] }}",
+            "Confidence": "={{ $json.sheet_row['Confidence'] }}",
+            "Confidence Bucket": "={{ $json.sheet_row['Confidence Bucket'] }}",
+            "Needs Manual Review": "={{ $json.sheet_row['Needs Manual Review'] }}",
+            "Manual Review Reason": "={{ $json.sheet_row['Manual Review Reason'] }}",
+            "High Value": "={{ $json.sheet_row['High Value'] }}",
+            "Status": "={{ $json.sheet_row['Status'] }}",
+            "Summary": "={{ $json.sheet_row['Summary'] }}",
+            "Gemini Model": "={{ $json.sheet_row['Gemini Model'] }}",
+            "Raw OCR JSON": "={{ $json.sheet_row['Raw OCR JSON'] }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "append-invoice-sheet",
+      "name": "Google Sheets: Lưu Kết Quả OCR",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2460,
+        320
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NHAP_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Append một dòng kết quả OCR vào sheet Invoice OCR. Tạo headers theo GUIDE.md trước khi activate."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Cấu Hình').first().json.telegram_chat_id }}",
+        "text": "={{ $('Parse Gemini OCR Result').item.json.telegram_done_message }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        }
+      },
+      "id": "telegram-done",
+      "name": "Telegram: Báo Đã Đọc Xong",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2720,
+        320
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "NHAP_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "notes": "Thông báo Telegram sau khi workflow đã OCR và ghi kết quả vào Google Sheet."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "high-value-check",
+              "leftValue": "={{ $('Parse Gemini OCR Result').item.json.is_high_value }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-high-value",
+      "name": "IF: Tổng Tiền > 10 Triệu?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2980,
+        320
+      ],
+      "notes": "Mặc định cảnh báo khi Total Amount > 10,000,000 VND. Đổi ngưỡng tại field high_value_threshold trong node Cấu Hình."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Cấu Hình').first().json.telegram_chat_id }}",
+        "text": "={{ $('Parse Gemini OCR Result').item.json.telegram_alert_message }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        }
+      },
+      "id": "telegram-high-value-alert",
+      "name": "Telegram: Cảnh Báo Hóa Đơn Lớn",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3240,
+        200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "NHAP_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "notes": "Gửi cảnh báo riêng khi hóa đơn vượt ngưỡng giá trị lớn."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "txn-anomaly",
+              "leftValue": "={{ $('Parse Gemini OCR Result').item.json.is_txn_anomaly }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-txn-anomaly",
+      "name": "IF: Giao Dịch > 30 Triệu?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2980,
+        520
+      ],
+      "notes": "Phát hiện anomaly khi 1 hóa đơn đơn lẻ vượt ngưỡng giao dịch lớn (anomaly_txn_threshold, mặc định 30 triệu)."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.google_sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.anomalies_sheet_name }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $('Parse Gemini OCR Result').item.json.anomaly_row['Date'] }}",
+            "Period": "={{ $('Parse Gemini OCR Result').item.json.anomaly_row['Period'] }}",
+            "Metric": "={{ $('Parse Gemini OCR Result').item.json.anomaly_row['Metric'] }}",
+            "Value VND": "={{ $('Parse Gemini OCR Result').item.json.anomaly_row['Value VND'] }}",
+            "Baseline VND": "={{ $('Parse Gemini OCR Result').item.json.anomaly_row['Baseline VND'] }}",
+            "Delta %": "={{ $('Parse Gemini OCR Result').item.json.anomaly_row['Delta %'] }}",
+            "Severity": "={{ $('Parse Gemini OCR Result').item.json.anomaly_row['Severity'] }}",
+            "Note": "={{ $('Parse Gemini OCR Result').item.json.anomaly_row['Note'] }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "append-txn-anomaly",
+      "name": "Google Sheets: Ghi Anomaly (Giao Dịch Lớn)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3240,
+        520
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NHAP_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Ghi 1 dòng vào tab Anomalies cho mỗi hóa đơn vượt ngưỡng giao dịch lớn. Cùng schema 8 cột với anomaly của workflow commentary."
+    }
+  ],
+  "connections": {
+    "Google Drive Trigger: Ảnh Hóa Đơn Mới": {
+      "main": [
+        [
+          {
+            "node": "Cấu Hình",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cấu Hình": {
+      "main": [
+        [
+          {
+            "node": "Lọc File Ảnh/PDF Hóa Đơn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lọc File Ảnh/PDF Hóa Đơn": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Đọc File Đã Xử Lý",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets: Đọc File Đã Xử Lý": {
+      "main": [
+        [
+          {
+            "node": "Lọc File Chưa Xử Lý",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lọc File Chưa Xử Lý": {
+      "main": [
+        [
+          {
+            "node": "Google Drive: Tải File Hóa Đơn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive: Tải File Hóa Đơn": {
+      "main": [
+        [
+          {
+            "node": "Tạo Gemini Vision OCR Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tạo Gemini Vision OCR Request": {
+      "main": [
+        [
+          {
+            "node": "Gemini Vision: OCR Hóa Đơn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Vision: OCR Hóa Đơn": {
+      "main": [
+        [
+          {
+            "node": "Parse Gemini OCR Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Gemini OCR Result": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Lưu Kết Quả OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets: Lưu Kết Quả OCR": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Báo Đã Đọc Xong",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: Báo Đã Đọc Xong": {
+      "main": [
+        [
+          {
+            "node": "IF: Tổng Tiền > 10 Triệu?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF: Giao Dịch > 30 Triệu?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Tổng Tiền > 10 Triệu?": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Cảnh Báo Hóa Đơn Lớn",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "IF: Giao Dịch > 30 Triệu?": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Ghi Anomaly (Giao Dịch Lớn)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": [
+    "enterprise",
+    "invoice",
+    "ocr",
+    "gemini",
+    "google-drive",
+    "google-sheets",
+    "telegram",
+    "analytics"
+  ],
+  "triggerCount": 1,
+  "versionId": "2.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-invoice-ocr-vision-v2"
+  },
+  "id": "wf-18-invoice-ocr-vision-v2",
+  "description": "v2: Drive trigger -> dedup -> Gemini Vision OCR -> Google Sheets (33 cột analytics-ready: invoice_date_iso, total_amount_vnd, year_month, quarter, vendor_canonical, confidence_bucket, status) -> Telegram. Feed cho Looker Studio + workflow commentary."
+}

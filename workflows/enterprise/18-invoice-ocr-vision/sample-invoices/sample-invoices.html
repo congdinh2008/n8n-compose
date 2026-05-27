@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>10 mẫu hóa đơn OCR Vision</title>
+  <style>
+    :root {
+      color: #111827;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    body {
+      margin: 0;
+      background: #f3f4f6;
+    }
+    .page {
+      width: 794px;
+      min-height: 1123px;
+      margin: 24px auto;
+      padding: 48px;
+      box-sizing: border-box;
+      background: #fff;
+      page-break-after: always;
+      border: 1px solid #d1d5db;
+    }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      border-bottom: 3px solid #1f2937;
+      padding-bottom: 18px;
+      margin-bottom: 24px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+    .muted {
+      color: #4b5563;
+      line-height: 1.45;
+    }
+    .box {
+      border: 1px solid #d1d5db;
+      padding: 14px;
+      margin-bottom: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 18px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid #d1d5db;
+      padding: 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #e5e7eb;
+    }
+    .num {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .totals {
+      width: 360px;
+      margin-left: auto;
+      margin-top: 20px;
+    }
+    .totals td:first-child {
+      font-weight: 700;
+    }
+    .grand {
+      font-size: 18px;
+      font-weight: 700;
+      background: #fef3c7;
+    }
+    .footer {
+      margin-top: 40px;
+      display: flex;
+      justify-content: space-between;
+      color: #374151;
+    }
+    @page {
+      size: A4;
+      margin: 0;
+    }
+    @media print {
+      body { background: #fff; }
+      .page {
+        margin: 0;
+        border: 0;
+      }
+      .page:last-child {
+        page-break-after: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main id="invoices"></main>
+  <script>
+    const invoices = [
+      {
+        no: 'HD-2026-0001',
+        date: '2026-05-01',
+        seller: 'Công ty TNHH Văn Phòng Sao Mai',
+        tax: '0312456789',
+        address: '12 Nguyễn Văn Trỗi, Phú Nhuận, TP.HCM',
+        buyer: 'Công ty Cổ phần An Phát',
+        buyerTax: '0109988776',
+        items: [
+          ['Giấy A4 Double A', 10, 85000],
+          ['Mực in HP 76A', 2, 800000]
+        ],
+        discount: 0,
+        payment: 'Chuyển khoản'
+      },
+      {
+        no: 'HD-2026-0002',
+        date: '2026-05-02',
+        seller: 'Nhà hàng Sen Việt',
+        tax: '0301122334',
+        address: '88 Lê Lợi, Quận 1, TP.HCM',
+        buyer: 'Công ty Cổ phần An Phát',
+        buyerTax: '0109988776',
+        items: [['Tiệc tiếp khách phòng kinh doanh', 1, 3800000]],
+        discount: 200000,
+        payment: 'Thẻ công ty'
+      },
+      {
+        no: 'HD-2026-0003',
+        date: '2026-05-03',
+        seller: 'Công ty CP Dịch vụ Bảo trì Minh Khang',
+        tax: '0315566778',
+        address: '45 Cách Mạng Tháng Tám, Quận 3, TP.HCM',
+        buyer: 'Công ty Cổ phần An Phát',
+        buyerTax: '0109988776',
+        items: [
+          ['Bảo trì điều hòa văn phòng', 4, 1500000],
+          ['Thay linh kiện máy lạnh', 1, 3200000]
+        ],
+        discount: 0,
+        payment: 'Chuyển khoản'
+      },
+      {
+        no: 'HD-2026-0004',
+        date: '2026-05-04',
+        seller: 'Công ty TNHH Logistics Đông Dương',
+        tax: '0317788990',
+        address: 'KCN Tân Bình, TP.HCM',
+        buyer: 'Công ty Cổ phần An Phát',
+        buyerTax: '0109988776',
+        items: [
+          ['Vận chuyển nội thành', 5, 900000],
+          ['Phụ phí nhiên liệu', 1, 2000000]
+        ],
+        discount: 0,
+        payment: 'Chuyển khoản'
+      },
+      {
+        no: 'HD-2026-0005',
+        date: '2026-05-05',
+        seller: 'Công ty TNHH Thiết bị Số Việt',
+        tax: '0313334455',
+        address: '101 Điện Biên Phủ, Bình Thạnh, TP.HCM',
+        buyer: 'Công ty Cổ phần An Phát',
+        buyerTax: '0109988776',
+        items: [
+          ['Laptop Dell Latitude 5450', 2, 6200000],
+          ['Chuột Logitech M650', 10, 210000]
+        ],
+        discount: 500000,
+        payment: 'Chuyển khoản'
+      },
+      {
+        no: 'HD-2026-0006',
+        date: '2026-05-06',
+        seller: 'Khách sạn Hòa Bình',
+        tax: '0309988112',
+        address: '29 Trần Phú, Nha Trang, Khánh Hòa',
+        buyer: 'Công ty Cổ phần An Phát',
+        buyerTax: '0109988776',
+        items: [['Phòng nghỉ công tác', 4, 1900000]],
+        discount: 0,
+        payment: 'Thẻ công ty'
+      },
+      {
+        no: 'HD-2026-0007',
+        date: '2026-05-07',
+        seller: 'Công ty CP Marketing Blue Ocean',
+        tax: '0319081726',
+        address: '72 Nguyễn Thị Minh Khai, Quận 3, TP.HCM',
+        buyer: 'Công ty Cổ phần An Phát',
+        buyerTax: '0109988776',
+        items: [['Chiến dịch quảng cáo tháng 5', 1, 30000000]],
+        discount: 0,
+        payment: 'Chuyển khoản'
+      },
+      {
+        no: 'HD-2026-0008',
+        date: '2026-05-08',
+        seller: 'Cửa hàng Điện Nước Thành Đạt',
+        tax: '0314445566',
+        address: '16 Phạm Văn Đồng, Thủ Đức, TP.HCM',
+        buyer: 'Công ty Cổ phần An Phát',
+        buyerTax: '0109988776',
+        items: [
+          ['Đèn LED 18W', 20, 65000],
+          ['Dây điện Cadivi', 5, 110000]
+        ],
+        discount: 0,
+        payment: 'Tiền mặt'
+      },
+      {
+        no: 'HD-2026-0009',
+        date: '2026-05-09',
+        seller: 'Công ty TNHH Đào tạo Trí Tuệ Việt',
+        tax: '0316677889',
+        address: '33 Võ Văn Tần, Quận 3, TP.HCM',
+        buyer: 'Công ty Cổ phần An Phát',
+        buyerTax: '0109988776',
+        items: [['Khóa đào tạo AI nội bộ', 1, 12000000]],
+        discount: 1000000,
+        payment: 'Chuyển khoản'
+      },
+      {
+        no: 'HD-2026-0010',
+        date: '2026-05-10',
+        seller: 'Công ty CP Nội thất Green Office',
+        tax: '0311010101',
+        address: '5 Nguyễn Hữu Cảnh, Bình Thạnh, TP.HCM',
+        buyer: 'Công ty Cổ phần An Phát',
+        buyerTax: '0109988776',
+        items: [
+          ['Ghế ergonomic', 5, 1350000],
+          ['Bàn làm việc 120cm', 2, 1000000]
+        ],
+        discount: 0,
+        payment: 'Chuyển khoản'
+      }
+    ];
+
+    const fmt = value => value.toLocaleString('vi-VN') + ' VND';
+    const root = document.getElementById('invoices');
+
+    for (const inv of invoices) {
+      const subtotal = inv.items.reduce((sum, row) => sum + row[1] * row[2], 0);
+      const vat = Math.round(subtotal * 0.1);
+      const total = subtotal + vat - inv.discount;
+      const rows = inv.items.map((row, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${row[0]}</td>
+          <td class="num">${row[1]}</td>
+          <td class="num">${fmt(row[2])}</td>
+          <td class="num">${fmt(row[1] * row[2])}</td>
+        </tr>
+      `).join('');
+
+      root.insertAdjacentHTML('beforeend', `
+        <section class="page">
+          <div class="top">
+            <div>
+              <h1>HÓA ĐƠN GIÁ TRỊ GIA TĂNG</h1>
+              <div class="muted">VAT INVOICE - Mẫu dùng để test OCR Vision</div>
+            </div>
+            <div class="muted">
+              <strong>Số hóa đơn:</strong> ${inv.no}<br>
+              <strong>Ngày lập:</strong> ${inv.date}
+            </div>
+          </div>
+          <div class="grid">
+            <div class="box">
+              <h2>Bên bán</h2>
+              <div><strong>${inv.seller}</strong></div>
+              <div class="muted">MST: ${inv.tax}</div>
+              <div class="muted">Địa chỉ: ${inv.address}</div>
+            </div>
+            <div class="box">
+              <h2>Bên mua</h2>
+              <div><strong>${inv.buyer}</strong></div>
+              <div class="muted">MST: ${inv.buyerTax}</div>
+              <div class="muted">Hình thức thanh toán: ${inv.payment}</div>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>STT</th>
+                <th>Hàng hóa / Dịch vụ</th>
+                <th>Số lượng</th>
+                <th>Đơn giá</th>
+                <th>Thành tiền</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <table class="totals">
+            <tr><td>Tạm tính</td><td class="num">${fmt(subtotal)}</td></tr>
+            <tr><td>VAT 10%</td><td class="num">${fmt(vat)}</td></tr>
+            <tr><td>Giảm giá</td><td class="num">${fmt(inv.discount)}</td></tr>
+            <tr class="grand"><td>TỔNG THANH TOÁN</td><td class="num">${fmt(total)}</td></tr>
+          </table>
+          <div class="footer">
+            <div>Người mua hàng<br><br><br>________________</div>
+            <div>Người bán hàng<br><br><br>________________</div>
+          </div>
+        </section>
+      `);
+    }
+  </script>
+</body>
+</html>

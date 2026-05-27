@@ -1,0 +1,452 @@
+{
+  "name": "18 · Enterprise: Invoice Analytics — Daily Commentary & Smart Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-daily",
+      "name": "Lịch: Chạy Hằng Ngày",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        160,
+        300
+      ],
+      "notes": "Chạy 6:00 sáng hằng ngày (giờ VN). Đổi lịch tại cron expression."
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "google_sheet_id",
+              "type": "string",
+              "value": "NHAP_GOOGLE_SHEET_ID"
+            },
+            {
+              "id": "c2",
+              "name": "fact_sheet_name",
+              "type": "string",
+              "value": "Invoice OCR"
+            },
+            {
+              "id": "c3",
+              "name": "commentary_sheet_name",
+              "type": "string",
+              "value": "Commentary"
+            },
+            {
+              "id": "c4",
+              "name": "anomalies_sheet_name",
+              "type": "string",
+              "value": "Anomalies"
+            },
+            {
+              "id": "c5",
+              "name": "gemini_model",
+              "type": "string",
+              "value": "gemini-2.5-flash"
+            },
+            {
+              "id": "c6",
+              "name": "telegram_chat_id",
+              "type": "string",
+              "value": "NHAP_TELEGRAM_CHAT_ID"
+            },
+            {
+              "id": "c7",
+              "name": "anomaly_pct_threshold",
+              "type": "number",
+              "value": 30
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "config-set-vars",
+      "name": "Cấu Hình",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        380,
+        300
+      ],
+      "notes": "Cấu hình tập trung: Sheet ID, tên các tab (fact/commentary/anomalies), model Gemini, Telegram chat ID, ngưỡng % bất thường."
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.google_sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.fact_sheet_name }}",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-fact",
+      "name": "Google Sheets: Đọc Dữ Liệu Hóa Đơn",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        600,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NHAP_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Đọc toàn bộ tab Invoice OCR (fact table) để tính KPI."
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(r => r.json);\nconst cfg = $('Cấu Hình').first().json;\n\nfunction num(v) {\n  const n = Number(String(v ?? '').replace(/[^0-9.-]/g, ''));\n  return Number.isFinite(n) ? n : 0;\n}\nfunction truthy(v) { return String(v).toLowerCase() === 'true'; }\n\nconst ym = new Date().toISOString().slice(0, 7);\nconst ymParts = ym.split('-').map(Number);\nconst prevYm = `${ymParts[1] === 1 ? ymParts[0] - 1 : ymParts[0]}-${String(ymParts[1] === 1 ? 12 : ymParts[1] - 1).padStart(2, '0')}`;\n\nfunction monthRows(m) { return rows.filter(r => String(r['Year Month'] || '') === m); }\n\nfunction agg(rs) {\n  const spend = rs.reduce((s, r) => s + num(r['Total Amount VND']), 0);\n  const count = rs.length;\n  const needReview = rs.filter(r => String(r['Status']) === 'manual_review' || truthy(r['Needs Manual Review'])).length;\n  const highValue = rs.filter(r => truthy(r['High Value'])).length;\n  const failed = rs.filter(r => String(r['Status']) === 'ocr_failed').length;\n  const byVendor = {};\n  for (const r of rs) {\n    const v = String(r['Vendor Canonical'] || r['Seller Name'] || '(không rõ)');\n    byVendor[v] = (byVendor[v] || 0) + num(r['Total Amount VND']);\n  }\n  const top = Object.entries(byVendor).sort((a, b) => b[1] - a[1])[0];\n  return { spend, count, avg: count ? Math.round(spend / count) : 0, needReview, highValue, failed,\n           topVendor: top ? top[0] : '(không rõ)', topVendorSpend: top ? top[1] : 0 };\n}\n\nconst cur = agg(monthRows(ym));\nconst prv = agg(monthRows(prevYm));\nconst spendDeltaPct = prv.spend > 0 ? Math.round(((cur.spend - prv.spend) / prv.spend) * 100) : null;\nconst anomalyThreshold = Number(cfg.anomaly_pct_threshold) || 30;\nconst isAnomaly = spendDeltaPct !== null && Math.abs(spendDeltaPct) >= anomalyThreshold;\nconst model = String(cfg.gemini_model || 'gemini-2.5-flash');\n\nconst prompt = `Bạn là Senior Data Analyst của phòng kế toán. Viết commentary 100-150 từ tiếng Việt cho dashboard chi tiêu hóa đơn.\n\nDATA THÁNG ${ym}:\n- Tổng chi (VND): ${cur.spend.toLocaleString('vi-VN')} (tháng trước ${prevYm}: ${prv.spend.toLocaleString('vi-VN')}${spendDeltaPct !== null ? `, thay đổi ${spendDeltaPct > 0 ? '+' : ''}${spendDeltaPct}%` : ''})\n- Số hóa đơn: ${cur.count} | Giá trị trung bình: ${cur.avg.toLocaleString('vi-VN')} VND\n- Nhà cung cấp chi nhiều nhất: ${cur.topVendor} (${cur.topVendorSpend.toLocaleString('vi-VN')} VND)\n- Hóa đơn giá trị lớn: ${cur.highValue} | Cần kiểm tra lại: ${cur.needReview} | Lỗi OCR: ${cur.failed}\n\nQUY TẮC VIẾT:\n- Tone professional, không alarmist, không bịa insight.\n- Mở đầu bằng con số quan trọng nhất + so sánh tháng trước.\n- 1-2 nhận định đáng chú ý (vendor tập trung chi, chất lượng OCR, xu hướng chi tiêu).\n- Kết: 1-2 hành động cụ thể cho kế toán/quản lý.\n- Nếu mọi thứ bình thường thì nói ngắn gọn, đừng bịa \"insight\".\n- KHÔNG markdown, KHÔNG emoji. Chỉ trả text thuần 100-150 từ.`;\n\nreturn [{\n  json: {\n    metrics: {\n      thang: ym, thang_truoc: prevYm,\n      chi_thang_nay: cur.spend, chi_thang_truoc: prv.spend, delta_pct: spendDeltaPct,\n      so_hoa_don: cur.count, gia_tri_tb: cur.avg,\n      can_review: cur.needReview, hoa_don_lon: cur.highValue, loi_ocr: cur.failed,\n      top_vendor: cur.topVendor, top_vendor_chi: cur.topVendorSpend\n    },\n    is_anomaly: isAnomaly,\n    spend_delta_pct: spendDeltaPct,\n    gemini_model: model,\n    gemini_request: {\n      contents: [{ role: 'user', parts: [{ text: prompt }] }],\n      generationConfig: { temperature: 0.3, maxOutputTokens: 1024 }\n    }\n  }\n}];"
+      },
+      "id": "calc-kpi",
+      "name": "Tính KPI & Bất Thường",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        300
+      ],
+      "notes": "Tính KPI tháng này vs tháng trước, top vendor, phát hiện bất thường, tạo prompt cho Gemini."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $json.gemini_model }}:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.gemini_request }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "gemini-commentary",
+      "name": "Gemini: Viết Nhận Định",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        300
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "NHAP_GEMINI_CREDENTIAL_ID",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "notes": "Gọi Gemini sinh nhận định tiếng Việt. Có retry; nếu fail vẫn ghi commentary fallback."
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst kpi = $('Tính KPI & Bất Thường').first().json;\nconst m = kpi.metrics;\n\nfunction esc(v) { return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n\nlet commentary = (resp?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();\nif (!commentary) {\n  commentary = 'Không tạo được nhận định tự động (Gemini không trả nội dung). Vui lòng xem số liệu trực tiếp trên dashboard.';\n}\n\nconst today = new Date().toISOString().slice(0, 10);\nconst now = new Date().toISOString();\n\nconst commentaryRow = {\n  'Date': today,\n  'Period': m.thang,\n  'Commentary': commentary,\n  'Total Spend VND': m.chi_thang_nay,\n  'Invoice Count': m.so_hoa_don,\n  'Avg Value VND': m.gia_tri_tb,\n  'Delta vs Prev %': m.delta_pct,\n  'Needs Review': m.can_review,\n  'OCR Failed': m.loi_ocr,\n  'Top Vendor': m.top_vendor,\n  'Generated At': now\n};\n\nconst out = { commentary, commentary_row: commentaryRow, is_anomaly: Boolean(kpi.is_anomaly) };\n\nif (kpi.is_anomaly) {\n  const delta = kpi.spend_delta_pct;\n  const sign = delta > 0 ? 'tăng' : 'giảm';\n  const severity = Math.abs(delta) >= 50 ? 'HIGH' : 'MEDIUM';\n  out.anomaly_row = {\n    'Date': today,\n    'Period': m.thang,\n    'Metric': 'Tổng chi tiêu tháng',\n    'Value VND': m.chi_thang_nay,\n    'Baseline VND': m.chi_thang_truoc,\n    'Delta %': delta,\n    'Severity': severity,\n    'Note': `Chi tiêu tháng ${m.thang} ${sign} ${Math.abs(delta)}% so với ${m.thang_truoc}.`\n  };\n  out.telegram_message = `🚨 <b>CẢNH BÁO CHI TIÊU BẤT THƯỜNG</b>\\n\\n<b>Kỳ:</b> ${esc(m.thang)}\\n<b>Tổng chi:</b> ${Number(m.chi_thang_nay).toLocaleString('vi-VN')} VND (${sign} ${Math.abs(delta)}% vs ${esc(m.thang_truoc)})\\n<b>Số hóa đơn:</b> ${m.so_hoa_don}\\n<b>Mức độ:</b> ${severity}\\n\\n${esc(commentary)}`;\n}\n\nreturn [{ json: out }];"
+      },
+      "id": "prepare-write",
+      "name": "Chuẩn Bị Ghi Dashboard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1260,
+        300
+      ],
+      "notes": "Lấy text commentary, dựng row Commentary + row Anomaly + message Telegram."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.google_sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.commentary_sheet_name }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.commentary_row['Date'] }}",
+            "Period": "={{ $json.commentary_row['Period'] }}",
+            "Commentary": "={{ $json.commentary_row['Commentary'] }}",
+            "Total Spend VND": "={{ $json.commentary_row['Total Spend VND'] }}",
+            "Invoice Count": "={{ $json.commentary_row['Invoice Count'] }}",
+            "Avg Value VND": "={{ $json.commentary_row['Avg Value VND'] }}",
+            "Delta vs Prev %": "={{ $json.commentary_row['Delta vs Prev %'] }}",
+            "Needs Review": "={{ $json.commentary_row['Needs Review'] }}",
+            "OCR Failed": "={{ $json.commentary_row['OCR Failed'] }}",
+            "Top Vendor": "={{ $json.commentary_row['Top Vendor'] }}",
+            "Generated At": "={{ $json.commentary_row['Generated At'] }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "append-commentary",
+      "name": "Google Sheets: Ghi Commentary",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1480,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NHAP_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Append 1 dòng nhận định vào tab Commentary. Looker hiển thị dòng mới nhất."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "anomaly",
+              "leftValue": "={{ $('Chuẩn Bị Ghi Dashboard').first().json.is_anomaly }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-anomaly",
+      "name": "IF: Có Bất Thường?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        300
+      ],
+      "notes": "Rẽ nhánh khi chi tiêu tháng vượt ngưỡng % bất thường."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.google_sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Cấu Hình').first().json.anomalies_sheet_name }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $('Chuẩn Bị Ghi Dashboard').first().json.anomaly_row['Date'] }}",
+            "Period": "={{ $('Chuẩn Bị Ghi Dashboard').first().json.anomaly_row['Period'] }}",
+            "Metric": "={{ $('Chuẩn Bị Ghi Dashboard').first().json.anomaly_row['Metric'] }}",
+            "Value VND": "={{ $('Chuẩn Bị Ghi Dashboard').first().json.anomaly_row['Value VND'] }}",
+            "Baseline VND": "={{ $('Chuẩn Bị Ghi Dashboard').first().json.anomaly_row['Baseline VND'] }}",
+            "Delta %": "={{ $('Chuẩn Bị Ghi Dashboard').first().json.anomaly_row['Delta %'] }}",
+            "Severity": "={{ $('Chuẩn Bị Ghi Dashboard').first().json.anomaly_row['Severity'] }}",
+            "Note": "={{ $('Chuẩn Bị Ghi Dashboard').first().json.anomaly_row['Note'] }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "append-anomaly",
+      "name": "Google Sheets: Ghi Anomaly",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        200
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NHAP_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Ghi log bất thường vào tab Anomalies."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Cấu Hình').first().json.telegram_chat_id }}",
+        "text": "={{ $('Chuẩn Bị Ghi Dashboard').first().json.telegram_message }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        }
+      },
+      "id": "telegram-anomaly",
+      "name": "Telegram: Cảnh Báo Bất Thường",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1920,
+        400
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "NHAP_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      },
+      "notes": "Smart alert: chi tiêu bất thường kèm nhận định AI."
+    }
+  ],
+  "connections": {
+    "Lịch: Chạy Hằng Ngày": {
+      "main": [
+        [
+          {
+            "node": "Cấu Hình",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cấu Hình": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Đọc Dữ Liệu Hóa Đơn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets: Đọc Dữ Liệu Hóa Đơn": {
+      "main": [
+        [
+          {
+            "node": "Tính KPI & Bất Thường",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tính KPI & Bất Thường": {
+      "main": [
+        [
+          {
+            "node": "Gemini: Viết Nhận Định",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini: Viết Nhận Định": {
+      "main": [
+        [
+          {
+            "node": "Chuẩn Bị Ghi Dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chuẩn Bị Ghi Dashboard": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Ghi Commentary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets: Ghi Commentary": {
+      "main": [
+        [
+          {
+            "node": "IF: Có Bất Thường?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Có Bất Thường?": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Ghi Anomaly",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram: Cảnh Báo Bất Thường",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "staticData": null,
+  "tags": [
+    "enterprise",
+    "invoice",
+    "analytics",
+    "commentary",
+    "gemini",
+    "google-sheets",
+    "telegram"
+  ],
+  "triggerCount": 1,
+  "versionId": "2.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "enterprise-invoice-analytics-commentary"
+  },
+  "id": "wf-18-invoice-analytics-commentary",
+  "description": "Schedule daily -> đọc fact sheet -> tính KPI tháng + so sánh tháng trước -> Gemini viết nhận định tiếng Việt -> ghi tab Commentary; nếu chi tiêu bất thường thì ghi tab Anomalies + Telegram smart alert. Feed cho dashboard Looker Studio."
+}
