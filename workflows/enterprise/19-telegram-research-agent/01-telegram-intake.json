@@ -1,0 +1,469 @@
+{
+  "name": "19-telegram-research-agent-01-telegram-intake",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "94c6d3ca-e539-4cdf-983c-b0c00393a05c",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        80,
+        1632
+      ],
+      "webhookId": "research-intake-webhook",
+      "credentials": {
+        "telegramApi": {
+          "id": "UdlGsBpxH6NYkqYg",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "check-text",
+              "leftValue": "={{ $json.message?.text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cb95e54a-be31-47bb-a991-c1412b377adf",
+      "name": "IF: Has Text?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        368,
+        1632
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "v01",
+              "name": "SHEET_ID",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            },
+            {
+              "id": "v02",
+              "name": "SHEET_NAME",
+              "value": "Research Queue",
+              "type": "string"
+            },
+            {
+              "id": "v03",
+              "name": "DRIVE_ROOT_FOLDER_ID",
+              "value": "YOUR_DRIVE_ROOT_FOLDER_ID",
+              "type": "string"
+            },
+            {
+              "id": "v04",
+              "name": "RESEARCH_SOURCES",
+              "value": "vnexpress.net,cafef.vn,tuoitre.vn,thanhnien.vn,mof.gov.vn,gso.gov.vn,statista.com,reuters.com,bloomberg.com,techcrunch.com,mckinsey.com",
+              "type": "string"
+            },
+            {
+              "id": "v05",
+              "name": "text",
+              "value": "={{ $node['Telegram Trigger'].json.message.text }}",
+              "type": "string"
+            },
+            {
+              "id": "v06",
+              "name": "chat_id",
+              "value": "={{ String($node['Telegram Trigger'].json.message.chat.id) }}",
+              "type": "string"
+            },
+            {
+              "id": "v07",
+              "name": "user_id",
+              "value": "={{ String($node['Telegram Trigger'].json.message.from?.id || '') }}",
+              "type": "string"
+            },
+            {
+              "id": "v08",
+              "name": "username",
+              "value": "={{ $node['Telegram Trigger'].json.message.from?.username || $node['Telegram Trigger'].json.message.from?.first_name || 'Anonymous' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "622655a5-2cec-4a60-abf4-6021287b3589",
+      "name": "Set: Config Vars",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        624,
+        1616
+      ],
+      "notes": "⚙️ CẤU HÌNH: Điền SHEET_ID, DRIVE_ROOT_FOLDER_ID và danh sách nguồn ưu tiên (RESEARCH_SOURCES) tại đây."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Phân tích yêu cầu research sau và trích xuất thông tin cần thiết.\n\nYÊU CẦU: {{ $json.text }}\n\nHãy trả về JSON (không có markdown, không có ```):  \n{\n  \"title\": \"Tiêu đề ngắn gọn mô tả chủ đề nghiên cứu (tối đa 80 ký tự, tiếng Việt)\",\n  \"research_type\": \"market_analysis|product_analysis|technology_research|competitor_analysis|industry_report|other\",\n  \"language\": \"vi\"\n}\n\nChỉ trả về JSON thuần túy."
+      },
+      "id": "d8fafe17-4e95-4400-bf3c-fe1c2256d7e5",
+      "name": "Gemini: Parse Request",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        832,
+        1616
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3-flash-preview",
+        "options": {
+          "maxOutputTokens": 3000,
+          "temperature": 0.1
+        }
+      },
+      "id": "8c92052c-0b4d-47b5-9a24-56ba513e541e",
+      "name": "Gemini Flash (Parse)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        832,
+        1824
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "0oldd2GFNcujd72t",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse response từ Gemini và build row data\nconst rawText = $input.first().json.text || '';\nconst config = $('Set: Config Vars').first().json;\n\n// Làm sạch JSON response\nlet cleanText = rawText.trim();\ncleanText = cleanText.replace(/^```json\\s*/i, '').replace(/\\s*```$/, '');\ncleanText = cleanText.replace(/^```\\s*/, '').replace(/\\s*```$/, '');\n\nlet parsed = {};\ntry {\n  parsed = JSON.parse(cleanText);\n} catch (e) {\n  // Fallback nếu parse thất bại\n  parsed = {\n    title: config.text.substring(0, 80),\n    research_type: 'other',\n    language: 'vi'\n  };\n}\n\nconst requestId = 'REQ-' + Date.now();\nconst now = new Date().toISOString();\n\nreturn [{\n  json: {\n    request_id: requestId,\n    title: (parsed.title || config.text.substring(0, 80)).trim(),\n    raw_request: config.text,\n    research_type: parsed.research_type || 'other',\n    chat_id: config.chat_id,\n    user_id: config.user_id,\n    username: config.username,\n    status: 'queue',\n    created_at: now,\n    updated_at: now,\n    // Pass config\n    SHEET_ID: config.SHEET_ID,\n    SHEET_NAME: config.SHEET_NAME\n  }\n}];"
+      },
+      "id": "105f16a7-a01c-4a5d-841e-2bdb40e81113",
+      "name": "Code: Build Row Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        1616
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.SHEET_NAME }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Request_ID": "={{ $json.request_id }}",
+            "Title": "={{ $json.title }}",
+            "Raw_Request": "={{ $json.raw_request }}",
+            "Research_Type": "={{ $json.research_type }}",
+            "Chat_ID": "={{ $json.chat_id }}",
+            "User_ID": "={{ $json.user_id }}",
+            "Status": "={{ $json.status }}",
+            "Created_At": "={{ $json.created_at }}",
+            "Updated_At": "={{ $json.updated_at }}"
+          },
+          "schema": [
+            {
+              "id": "Request_ID",
+              "displayName": "Request_ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Title",
+              "displayName": "Title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Raw_Request",
+              "displayName": "Raw_Request",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Research_Type",
+              "displayName": "Research_Type",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Chat_ID",
+              "displayName": "Chat_ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "User_ID",
+              "displayName": "User_ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Created_At",
+              "displayName": "Created_At",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Updated_At",
+              "displayName": "Updated_At",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "d6a03728-894a-4379-ac2d-1bdd985c749a",
+      "name": "Sheets: Add to Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1328,
+        1616
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "OTVi5lxBJVidsIEe",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $node['Code: Build Row Data'].json.chat_id }}",
+        "text": "=✅ *Đã nhận yêu cầu research!*\n\n📋 *ID:* `{{ $node['Code: Build Row Data'].json.request_id }}`\n📌 *Chủ đề:* {{ $node['Code: Build Row Data'].json.title }}\n🏷️ *Loại:* {{ $node['Code: Build Row Data'].json.research_type }}\n⏳ *Trạng thái:* Đang xếp hàng chờ xử lý\n\n_Bạn sẽ nhận thông báo khi báo cáo hoàn thành_ 🔔",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "d041223d-ca6f-46e4-8a21-5473193c84aa",
+      "name": "Telegram: Confirm",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1520,
+        1616
+      ],
+      "webhookId": "44d18312-8cac-4f50-988b-b803b323a783",
+      "credentials": {
+        "telegramApi": {
+          "id": "UdlGsBpxH6NYkqYg",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.message?.chat?.id }}",
+        "text": "=⚠️ *Vui lòng gửi yêu cầu dạng văn bản!*\n\nVí dụ:\n📊 _Phân tích thị trường xe điện Việt Nam 2025_\n🔍 _Phân tích sản phẩm iPhone 16 Pro Max_\n📈 _Báo cáo ngành thương mại điện tử ASEAN_",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "e272ecc7-91f8-4f33-9297-f6e838c13a55",
+      "name": "Telegram: No Text Warning",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        624,
+        1808
+      ],
+      "webhookId": "aab26302-d099-4934-92ec-5928e1f8af85",
+      "credentials": {
+        "telegramApi": {
+          "id": "UdlGsBpxH6NYkqYg",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "IF: Has Text?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Has Text?": {
+      "main": [
+        [
+          {
+            "node": "Set: Config Vars",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: No Text Warning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Config Vars": {
+      "main": [
+        [
+          {
+            "node": "Gemini: Parse Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Flash (Parse)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Gemini: Parse Request",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini: Parse Request": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Row Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Row Data": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Add to Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Add to Queue": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Confirm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7ba2dd65-6473-4fa6-b2cb-20e133cec30d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3006a5d6772217f5ebf10e103499012896c18b16962721572449c979edef3060"
+  },
+  "id": "O3YnbKaxqGgsaoQj",
+  "tags": [
+    {
+      "updatedAt": "2026-05-29T07:46:11.087Z",
+      "createdAt": "2026-05-29T07:46:11.087Z",
+      "id": "pHmdbe3WVnvAQV7N",
+      "name": "research-agent"
+    }
+  ]
+}

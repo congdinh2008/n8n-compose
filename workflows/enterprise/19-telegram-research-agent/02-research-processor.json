@@ -1,0 +1,1032 @@
+{
+  "name": "19-telegram-research-agent-02-research-processor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "68ffd3bd-0007-464b-8488-419614799530",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2352,
+        3344
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d50501cb-2b71-4bf1-b0ad-724f917e4e4c",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2352,
+        3568
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.SHEET_NAME }}",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "d3c4693c-178b-4de8-ac4b-3953d035a801",
+      "name": "Sheets: Get All Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1792,
+        3472
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "OTVi5lxBJVidsIEe",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lọc các yêu cầu có status=queue và lấy yêu cầu đầu tiên (oldest first)\nconst config = $('Set: Config Vars1').first().json;\nconst allItems = $input.all();\n\nconst queueItems = allItems\n  .filter(item => item.json.Status === 'queue')\n  .sort((a, b) => {\n    const dateA = new Date(a.json.Created_At || 0);\n    const dateB = new Date(b.json.Created_At || 0);\n    return dateA - dateB; // oldest first\n  });\n\nif (queueItems.length === 0) {\n  return [{ json: { has_pending: false, config } }];\n}\n\nconst first = queueItems[0].json;\nreturn [{\n  json: {\n    has_pending: true,\n    request_id: first.Request_ID,\n    title: first.Title,\n    raw_request: first.Raw_Request,\n    research_type: first.Research_Type || 'other',\n    chat_id: first.Chat_ID,\n    user_id: first.User_ID,\n    created_at: first.Created_At,\n    // Pass config\n    SHEET_ID: config.SHEET_ID,\n    SHEET_NAME: config.SHEET_NAME,\n    DRIVE_ROOT_FOLDER_ID: config.DRIVE_ROOT_FOLDER_ID,\n    RESEARCH_SOURCES: config.RESEARCH_SOURCES,\n    MAX_SEARCH_RESULTS: config.MAX_SEARCH_RESULTS,\n    TOP_URLS_TO_SCRAPE: config.TOP_URLS_TO_SCRAPE,\n    REPORT_LANGUAGE: config.REPORT_LANGUAGE\n  }\n}];"
+      },
+      "id": "4d4d3824-76d1-4b4a-ae02-bb5dbb4f7a03",
+      "name": "Code: Filter Queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1504,
+        3472
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "check-pending",
+              "leftValue": "={{ $json.has_pending }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2d026c1d-745e-4abd-aa24-43f4e67cefce",
+      "name": "IF: Has Pending?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1232,
+        3472
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.SHEET_NAME }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Request_ID": "={{ $json.request_id }}",
+            "Status": "processing",
+            "Updated_At": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "Request_ID"
+          ],
+          "schema": [
+            {
+              "id": "Request_ID",
+              "displayName": "Request_ID",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Updated_At",
+              "displayName": "Updated_At",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fecf9d07-31e8-4f56-b0e8-580b3cb233de",
+      "name": "Sheets: Update → Processing",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -944,
+        3344
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "OTVi5lxBJVidsIEe",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.raw_request }}",
+        "options": {
+          "systemMessage": "=Bạn là chuyên gia research thị trường và phân tích dữ liệu hàng đầu.\n\nNHIỆM VỤ: Nghiên cứu toàn diện về chủ đề sau:\nTITLE: {{ $json.title }}\nTYPE: {{ $json.research_type }}\n\nNGUỒN ƯU TIÊN: {{ $json.RESEARCH_SOURCES }}\n\nQUY TRÌNH BẮT BUỘC:\n1. Tạo 3-4 keyword tìm kiếm phù hợp với chủ đề (tiếng Việt và tiếng Anh nếu cần), ưu tiên domain từ NGUỒN ƯU TIÊN\n2. Dùng công cụ \"/search in Firecrawl\" với từng keyword để lấy danh sách URLs liên quan\n3. Từ kết quả search, chọn 4-5 URLs có nội dung cụ thể và uy tín nhất về chủ đề\n4. Dùng công cụ \"/scrape in Firecrawl2\" để đọc nội dung đầy đủ từng URL đó\n5. Thu thập số liệu cụ thể, thống kê, dữ liệu định lượng từ các bài viết\n\nYÊU CẦU:\n- Ưu tiên tìm: số liệu thị trường, xu hướng, đối thủ, cơ hội, rủi ro\n- Mỗi URL scrape, giữ lại phần nội dung quan trọng nhất\n- Tổng hợp và trả về kết quả research hoàn chỉnh bằng tiếng Việt bao gồm:\n  * Các phát hiện chính với dẫn chứng từ nguồn\n  * Số liệu, thống kê quan trọng\n  * Danh sách URLs đã sử dụng",
+          "maxIterations": 15
+        }
+      },
+      "id": "4d74712d-50e7-45e1-bc45-f08c53d0455b",
+      "name": "AI Agent: Research",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -368,
+        3344
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3-flash-preview",
+        "options": {
+          "maxOutputTokens": 8192,
+          "temperature": 0.3
+        }
+      },
+      "id": "34b3d9a3-072d-4ee5-99d5-5746769fc388",
+      "name": "Gemini Flash (Agent)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -496,
+        3648
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "0oldd2GFNcujd72t",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Dựa trên kết quả research sau đây, viết một BÁO CÁO CHUYÊN SÂU HOÀN CHỈNH bằng tiếng Việt.\n\n--- DỮ LIỆU RESEARCH ---\n{{ $json.output }}\n--- KẾT THÚC DỮ LIỆU ---\n\nTHÔNG TIN BÁO CÁO:\n- Tiêu đề: {{ $node['Code: Filter Queue'].json.title }}\n- Loại nghiên cứu: {{ $node['Code: Filter Queue'].json.research_type }}\n- Ngày: {{ new Date().toLocaleDateString('vi-VN') }}\n\nViết báo cáo theo đúng format Markdown sau:\n\n# {{ $node['Code: Filter Queue'].json.title }}\n\n**Ngày báo cáo:** [ngày hôm nay] | **Loại:** [research_type] | **Trạng thái:** Hoàn thành\n\n---\n\n## Tóm Tắt Điều Hành\n[3-5 bullet points với các phát hiện quan trọng nhất]\n\n## Bối Cảnh & Tổng Quan\n[Giới thiệu về chủ đề, tại sao quan trọng]\n\n## Phân Tích Chi Tiết\n[Nội dung phân tích sâu với dẫn chứng và số liệu]\n\n## Dữ Liệu & Số Liệu Quan Trọng\n[Bảng hoặc danh sách các số liệu, thống kê cụ thể]\n\n## Xu Hướng & Cơ Hội\n[Các xu hướng đang nổi lên và cơ hội tiềm năng]\n\n## Rủi Ro & Thách Thức\n[Các rủi ro cần lưu ý]\n\n## Kết Luận & Khuyến Nghị\n[3-5 khuyến nghị hành động cụ thể]\n\n## Nguồn Tham Khảo\n[Danh sách các URLs đã sử dụng]\n\nYÊU CẦU:\n- Ngôn ngữ tiếng Việt chuẩn, chuyên nghiệp\n- Tổng độ dài 2000-3500 từ\n- Trích dẫn số liệu với nguồn rõ ràng\n- Sử dụng format Markdown chuẩn (heading ##, bold **text**, bullet -, bảng |---|)"
+      },
+      "id": "9461c57c-e0f8-4648-8041-e110d707be69",
+      "name": "Gemini: Write Report",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        -16,
+        3088
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3-flash-preview",
+        "options": {
+          "maxOutputTokens": 8192,
+          "temperature": 0.4
+        }
+      },
+      "id": "fcec3fc3-5936-4856-8987-4fe36238a0e9",
+      "name": "Gemini Flash (Report)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -16,
+        3264
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "0oldd2GFNcujd72t",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Chuẩn bị nội dung file báo cáo và tên folder\nconst reportMarkdown = $input.first().json.text || '';\nconst req = $('Code: Rebuild Context').first().json;\n\n// Tạo tên folder: RequestID - Title - YYYY-MM-DD\nconst dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD\nconst safeTitle = req.title\n  .replace(/[/\\\\:*?\"<>|]/g, '-') // ký tự không hợp lệ cho tên folder\n  .substring(0, 60);\nconst folderName = `${req.request_id} - ${safeTitle} - ${dateStr}`;\n\n// Encode report sang base64 để upload Drive\nconst reportBuffer = Buffer.from(reportMarkdown, 'utf-8');\nconst reportBase64 = reportBuffer.toString('base64');\n\n// Trích xuất overview (200 ký tự đầu của nội dung sau header)\nconst lines = reportMarkdown.split('\\n').filter(l => l.trim());\nlet overview = '';\nfor (const line of lines) {\n  if (!line.startsWith('#') && !line.startsWith('---') && !line.startsWith('**')) {\n    overview += line.replace(/[*_#]/g, '').trim() + ' ';\n    if (overview.length > 200) break;\n  }\n}\noverview = overview.trim().substring(0, 250);\n\nreturn [{\n  json: {\n    folder_name: folderName,\n    report_filename: `report-${req.request_id}.md`,\n    report_markdown: reportMarkdown,\n    overview: overview || req.title,\n    request_id: req.request_id,\n    chat_id: req.chat_id,\n    title: req.title,\n    DRIVE_ROOT_FOLDER_ID: req.DRIVE_ROOT_FOLDER_ID,\n    SHEET_ID: req.SHEET_ID,\n    SHEET_NAME: req.SHEET_NAME\n  },\n  binary: {\n    reportFile: {\n      data: reportBase64,\n      mimeType: 'text/markdown',\n      fileName: `report-${req.request_id}.md`,\n      fileExtension: 'md'\n    }\n  }\n}];"
+      },
+      "id": "29d8b57d-c409-4fec-93c4-eba5a7d7942e",
+      "name": "Code: Prepare Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        3088
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lưu folder ID và chuẩn bị dữ liệu cho upload\nconst folderResponse = $input.first().json;\nconst prevData = $('Code: Prepare Files').first().json;\nconst prevBinary = $('Code: Prepare Files').first().binary;\n\nconst folderId = folderResponse.id || '';\nconst folderLink = folderId ? `https://drive.google.com/drive/folders/${folderId}` : '';\n\nreturn [{\n  json: {\n    ...prevData,\n    folder_id: folderId,\n    folder_link: folderLink\n  },\n  binary: prevBinary\n}];"
+      },
+      "id": "4bd39986-a8ac-4bed-9f65-32237bd75516",
+      "name": "Code: Save Folder ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        3088
+      ]
+    },
+    {
+      "parameters": {
+        "inputDataFieldName": "reportFile",
+        "name": "={{ $json.report_filename }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.folder_id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "49dbab36-7159-4c95-b0ac-ba29ddfd6cf5",
+      "name": "Drive: Upload Report",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        768,
+        3088
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "r5eBwFJAmxRRc23W",
+          "name": "Google Drive account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build final data sau khi upload\nconst uploadResp = $input.first().json;\nconst prev = $('Code: Save Folder ID').first().json;\n\nconst fileId = uploadResp.id || '';\nconst fileLink = uploadResp.webViewLink || (fileId ? `https://drive.google.com/file/d/${fileId}/view` : '');\n\nreturn [{\n  json: {\n    request_id: prev.request_id,\n    title: prev.title,\n    overview: prev.overview,\n    chat_id: prev.chat_id,\n    folder_link: prev.folder_link,\n    folder_id: prev.folder_id,\n    file_link: fileLink,\n    file_id: fileId,\n    SHEET_ID: prev.SHEET_ID,\n    SHEET_NAME: prev.SHEET_NAME\n  }\n}];"
+      },
+      "id": "839d9690-84ba-4182-9087-aec7be90072c",
+      "name": "Code: Build Final Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        3072
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.SHEET_NAME }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Request_ID": "={{ $json.request_id }}",
+            "Status": "done",
+            "Overview": "={{ $json.overview }}",
+            "Drive_Folder_Link": "={{ $json.folder_link }}",
+            "Report_Link": "={{ $json.file_link }}",
+            "Updated_At": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "Request_ID"
+          ],
+          "schema": [
+            {
+              "id": "Request_ID",
+              "displayName": "Request_ID",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Overview",
+              "displayName": "Overview",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Drive_Folder_Link",
+              "displayName": "Drive_Folder_Link",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Report_Link",
+              "displayName": "Report_Link",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Updated_At",
+              "displayName": "Updated_At",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "53d3819e-2aac-452f-849b-0988b47e5c7f",
+      "name": "Sheets: Update → Done",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1168,
+        3072
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "OTVi5lxBJVidsIEe",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $node['Code: Build Final Data'].json.chat_id }}",
+        "text": "=📊 *Báo cáo Research Hoàn Thành!*\n\n📌 *Chủ đề:* {{ $node['Code: Build Final Data'].json.title }}\n🆔 *ID:* `{{ $node['Code: Build Final Data'].json.request_id }}`\n\n📝 *Tóm tắt:*\n{{ $node['Code: Build Final Data'].json.overview }}\n\n📁 *Folder Drive:* [Xem tại đây]({{ $node['Code: Build Final Data'].json.folder_link }})\n📄 *File Báo Cáo:* [Tải về]({{ $node['Code: Build Final Data'].json.file_link }})\n\n✅ Nghiên cứu hoàn tất! Mời bạn xem chi tiết báo cáo.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "075b56e7-6e40-474d-b3b5-4b9b6b3a842c",
+      "name": "Telegram: Notify Done",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1376,
+        3072
+      ],
+      "webhookId": "36e25a10-1da7-4241-9737-eb122280154a",
+      "credentials": {
+        "telegramApi": {
+          "id": "UdlGsBpxH6NYkqYg",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Không có yêu cầu đang chờ → dừng lại\nconsole.log('[Research Processor] Không có yêu cầu nào trong queue.');\nreturn [];"
+      },
+      "id": "345dac17-3130-4508-b9a5-1ce2c83c01b4",
+      "name": "No Op: No Pending",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -944,
+        3568
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Xử lý lỗi - lấy data từ $input (chứa full context từ Code: Rebuild Context)\n// KHÔNG dùng $node[] reference vì error branch có thể không truy cập được\nconst failedItem = $input.first();\nconst data = failedItem.json || {};\n\n// Lấy thông tin lỗi từ field error (n8n thêm vào khi continueErrorOutput)\nconst errorObj = data.error || {};\nconst errorMessage = typeof errorObj === 'string'\n  ? errorObj\n  : (errorObj.message || errorObj.description || JSON.stringify(errorObj) || 'Unknown error');\n\nreturn [{\n  json: {\n    request_id: data.request_id || 'UNKNOWN',\n    title: data.title || 'Unknown request',\n    chat_id: data.chat_id || '',\n    error_message: String(errorMessage).substring(0, 500),\n    SHEET_ID: data.SHEET_ID || '',\n    SHEET_NAME: data.SHEET_NAME || ''\n  }\n}];"
+      },
+      "id": "4f4b1d71-a997-4269-aaaf-c7a338e82f7c",
+      "name": "Code: Handle Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        3360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.SHEET_NAME }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Request_ID": "={{ $json.request_id }}",
+            "Status": "error",
+            "Overview": "=Lỗi xử lý: {{ $json.error_message.substring(0, 200) }}",
+            "Updated_At": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [
+            "Request_ID"
+          ],
+          "schema": [
+            {
+              "id": "Request_ID",
+              "displayName": "Request_ID",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Overview",
+              "displayName": "Overview",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "Updated_At",
+              "displayName": "Updated_At",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9233a352-43e1-43e8-b530-4024fd3be55f",
+      "name": "Sheets: Update → Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1184,
+        3360
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "OTVi5lxBJVidsIEe",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "=❌ *Có lỗi khi xử lý yêu cầu!*\n\n🆔 *ID:* `{{ $json.request_id }}`\n📌 *Chủ đề:* {{ $json.title }}\n\n⚠️ Vui lòng kiểm tra lại sau hoặc thử lại yêu cầu.\n\n_Chi tiết lỗi đã được ghi nhận trong hệ thống._",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "5aee0456-f2e2-4c60-a10c-9b71b85c0e83",
+      "name": "Telegram: Notify Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1376,
+        3360
+      ],
+      "webhookId": "f7d16704-1968-4058-8d64-7e17dba90d87",
+      "credentials": {
+        "telegramApi": {
+          "id": "UdlGsBpxH6NYkqYg",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sheets Update node chỉ pass qua {Request_ID, Status, Updated_At} → cần restore full context\n// Dùng $() accessor (n8n v1+ recommended) để lấy data từ Code: Filter Queue đã chạy trước\nlet queue;\ntry {\n  // Cách 1: n8n v1+ item accessor - recommended\n  queue = $('Code: Filter Queue').first().json;\n} catch (e1) {\n  try {\n    // Cách 2: node reference accessor - fallback\n    queue = $('Code: Filter Queue').first().json;\n  } catch (e2) {\n    throw new Error('Cannot restore context. Err1: ' + e1.message + ' | Err2: ' + e2.message);\n  }\n}\n\nif (!queue || !queue.request_id) {\n  throw new Error('Context empty after restore - check Code: Filter Queue output');\n}\n\nreturn [{ json: queue }];"
+      },
+      "id": "acf568ad-3468-4c7b-998c-d0e905bddba6",
+      "name": "Code: Rebuild Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        3344
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c01",
+              "name": "SHEET_ID",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            },
+            {
+              "id": "c02",
+              "name": "SHEET_NAME",
+              "value": "Research Queue",
+              "type": "string"
+            },
+            {
+              "id": "c03",
+              "name": "DRIVE_ROOT_FOLDER_ID",
+              "value": "YOUR_DRIVE_ROOT_FOLDER_ID",
+              "type": "string"
+            },
+            {
+              "id": "c05",
+              "name": "RESEARCH_SOURCES",
+              "value": "vnexpress.net,cafef.vn,tuoitre.vn,thanhnien.vn,mof.gov.vn,gso.gov.vn,statista.com,reuters.com,bloomberg.com,techcrunch.com,mckinsey.com,deloitte.com",
+              "type": "string"
+            },
+            {
+              "id": "c06",
+              "name": "MAX_SEARCH_RESULTS",
+              "value": "8",
+              "type": "string"
+            },
+            {
+              "id": "c07",
+              "name": "TOP_URLS_TO_SCRAPE",
+              "value": "5",
+              "type": "string"
+            },
+            {
+              "id": "c08",
+              "name": "REPORT_LANGUAGE",
+              "value": "Vietnamese",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "44d2ad08-c14e-48b0-9dbf-40f773267f04",
+      "name": "Set: Config Vars1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2064,
+        3472
+      ],
+      "notes": "⚙️ CẤU HÌNH CHÍNH: Điền SHEET_ID, DRIVE_ROOT_FOLDER_ID và danh sách nguồn ưu tiên RESEARCH_SOURCES tại đây. Firecrawl API Key cấu hình trong Credentials của node Firecrawl."
+    },
+    {
+      "parameters": {
+        "operation": "scrape",
+        "url": "={{ $fromAI('url', 'URL đầy đủ của trang cần đọc nội dung, ví dụ: https://vnexpress.net/bai-viet-123') }}",
+        "requestOptions": {}
+      },
+      "type": "@mendable/n8n-nodes-firecrawl.firecrawlTool",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        3648
+      ],
+      "id": "d8de1969-a98b-40d7-baba-5e81b974bbbc",
+      "name": "/scrape in Firecrawl2",
+      "credentials": {
+        "firecrawlApi": {
+          "id": "zHqlSbfCJYvmmU01",
+          "name": "Firecrawl account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "MapSearch",
+        "operation": "search",
+        "query": "={{ $fromAI('query', 'Từ khóa tìm kiếm thông tin, ví dụ: thị trường xe điện Việt Nam 2025') }}",
+        "requestOptions": {}
+      },
+      "type": "@mendable/n8n-nodes-firecrawl.firecrawlTool",
+      "typeVersion": 1,
+      "position": [
+        -304,
+        3648
+      ],
+      "id": "8f4d62ed-5921-4abb-acda-2da91b7803d9",
+      "name": "/search in Firecrawl",
+      "credentials": {
+        "firecrawlApi": {
+          "id": "zHqlSbfCJYvmmU01",
+          "name": "Firecrawl account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "={{ $json.folder_name }}",
+        "driveId": {
+          "__rl": true,
+          "value": "={{ $json.DRIVE_ROOT_FOLDER_ID }}",
+          "mode": "id"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.DRIVE_ROOT_FOLDER_ID }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        432,
+        3088
+      ],
+      "id": "38da1467-a362-40fc-859b-9e09f671c090",
+      "name": "Create folder",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "r5eBwFJAmxRRc23W",
+          "name": "Google Drive account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set: Config Vars1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set: Config Vars1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Get All Rows": {
+      "main": [
+        [
+          {
+            "node": "Code: Filter Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Filter Queue": {
+      "main": [
+        [
+          {
+            "node": "IF: Has Pending?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Has Pending?": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Update → Processing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Op: No Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Update → Processing": {
+      "main": [
+        [
+          {
+            "node": "Code: Rebuild Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Flash (Agent)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent: Research",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent: Research": {
+      "main": [
+        [
+          {
+            "node": "Gemini: Write Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Flash (Report)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Gemini: Write Report",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini: Write Report": {
+      "main": [
+        [
+          {
+            "node": "Code: Prepare Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Prepare Files": {
+      "main": [
+        [
+          {
+            "node": "Create folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Save Folder ID": {
+      "main": [
+        [
+          {
+            "node": "Drive: Upload Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive: Upload Report": {
+      "main": [
+        [
+          {
+            "node": "Code: Build Final Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Final Data": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Update → Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Update → Done": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Notify Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Handle Error": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Update → Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Update → Error": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Notify Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Rebuild Context": {
+      "main": [
+        [
+          {
+            "node": "AI Agent: Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Config Vars1": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Get All Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "/scrape in Firecrawl2": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent: Research",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "/search in Firecrawl": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent: Research",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create folder": {
+      "main": [
+        [
+          {
+            "node": "Code: Save Folder ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "a429f0ce-3922-438c-b892-f5d5e29e3dfd",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3006a5d6772217f5ebf10e103499012896c18b16962721572449c979edef3060"
+  },
+  "id": "evvOm6EdqHzoPPYU",
+  "tags": [
+    {
+      "updatedAt": "2026-05-29T07:46:11.087Z",
+      "createdAt": "2026-05-29T07:46:11.087Z",
+      "id": "pHmdbe3WVnvAQV7N",
+      "name": "research-agent"
+    }
+  ]
+}
