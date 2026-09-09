@@ -1,0 +1,21 @@
+{
+	email {$SSL_EMAIL}
+}
+
+{$N8N_HOST} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+		-Server
+	}
+
+	reverse_proxy n8n:5678
+
+	log {
+		output stdout
+		format json
+	}
+}

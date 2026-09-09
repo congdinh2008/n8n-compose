@@ -16,6 +16,12 @@ This repository contains the infrastructure configuration for running n8n with P
 
 ## Setup Instructions
 
+### Recommended classroom host on AWS Lightsail
+
+For one shared classroom instance, use the reviewed deployment in [`deploy/lightsail`](deploy/lightsail/README.md). It runs n8n, PostgreSQL, and Caddy on a 4 GB Lightsail instance in Singapore, keeps application and database ports private, enables HTTPS, and includes daily application backups.
+
+The existing Terraform AWS module remains available for EC2 deployments. Do not use its current bootstrap unchanged for the Lightsail classroom host.
+
 1. Clone this repository
 2. Copy configuration files:
    ```bash

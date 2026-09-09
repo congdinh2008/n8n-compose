@@ -1,0 +1,8 @@
+[Unit]
+Description=Back up n8n data and PostgreSQL
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/n8n/backup.sh

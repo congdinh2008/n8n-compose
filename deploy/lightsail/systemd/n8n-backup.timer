@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the n8n backup every day
+
+[Timer]
+OnCalendar=*-*-* 18:30:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
